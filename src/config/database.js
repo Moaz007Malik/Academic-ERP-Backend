@@ -6,7 +6,7 @@ export const tenantContext = new AsyncLocalStorage();
 const TENANT_MODELS = new Set([
   'Student', 'Teacher', 'Department', 'Course', 'Subject', 'Batch', 'Section',
   'Session', 'Semester', 'Attendance', 'Fee', 'FeeStructure', 'Result', 'Exam',
-  'Timetable', 'Assignment', 'Submission', 'TeacherAssignment', 'LibraryBook', 'LibraryIssue',
+  'Timetable', 'Assignment', 'Submission', 'TeacherAssignment', 'PersonDocument', 'LibraryBook', 'LibraryIssue',
   'HostelRoom', 'HostelAllotment', 'TransportRoute', 'TransportAllotment',
   'Notification', 'Announcement', 'CardDesign', 'Certificate', 'LoginHistory',
   'Salary', 'LeaveRequest', 'InventoryItem', 'SupportTicket', 'AuditLog',

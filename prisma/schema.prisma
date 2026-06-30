@@ -113,6 +113,23 @@ enum ExamType {
   SUPPLY
 }
 
+enum PersonDocType {
+  STUDENT
+  TEACHER
+}
+
+enum DocumentCategory {
+  CNIC
+  B_FORM
+  DEGREE
+  CERTIFICATE
+  TRANSCRIPT
+  APPOINTMENT_LETTER
+  EXPERIENCE_LETTER
+  PHOTO_ID
+  OTHER
+}
+
 // ─── Platform Tables (no instituteId) ────────────────────────────────────────
 
 model SubscriptionPlan {
@@ -187,6 +204,7 @@ model Institute {
   auditLogs          AuditLog[]
   subscriptionInvoices SubscriptionInvoice[]
   teacherAssignments TeacherAssignment[]
+  personDocuments    PersonDocument[]
 }
 
 model User {
@@ -216,6 +234,7 @@ model User {
   invoicesCreated SubscriptionInvoice[] @relation("InvoiceCreator")
   leaveRequests  LeaveRequest[]
   assignments    Assignment[]
+  documentsUploaded PersonDocument[] @relation("UploadedBy")
 
   @@index([instituteId, role])
   @@index([email])
@@ -375,6 +394,7 @@ model Student {
   hostelAllotments    HostelAllotment[]
   transportAllotments TransportAllotment[]
   certificates        Certificate[]
+  documents           PersonDocument[]
 
   @@unique([instituteId, rollNumber])
   @@index([instituteId])
@@ -401,8 +421,33 @@ model Teacher {
   salaries      Salary[]
   leaveRequests LeaveRequest[]
   assignments   TeacherAssignment[]
+  documents     PersonDocument[]
 
   @@index([instituteId])
+}
+
+model PersonDocument {
+  id           String           @id @default(uuid())
+  instituteId  String
+  institute    Institute        @relation(fields: [instituteId], references: [id])
+  personType   PersonDocType
+  studentId    String?
+  student      Student?         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  teacherId    String?
+  teacher      Teacher?         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  category     DocumentCategory @default(OTHER)
+  title        String           @db.VarChar(200)
+  fileName     String           @db.VarChar(300)
+  mimeType     String?          @db.VarChar(100)
+  fileSize     Int?
+  cloudinaryId String           @db.VarChar(300)
+  url          String           @db.VarChar(500)
+  uploadedById String?
+  uploadedBy   User?            @relation("UploadedBy", fields: [uploadedById], references: [id])
+  createdAt    DateTime         @default(now())
+
+  @@index([instituteId, studentId])
+  @@index([instituteId, teacherId])
 }
 
 model TeacherAssignment {

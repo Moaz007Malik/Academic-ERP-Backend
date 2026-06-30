@@ -29,14 +29,25 @@ import adminAttendanceRoutes from './modules/admin/attendance/attendance.routes.
 import adminFeesRoutes from './modules/admin/fees/fees.routes.js';
 import teacherPortalRoutes from './modules/teacher/portal/portal.routes.js';
 import studentPortalRoutes from './modules/student/portal/portal.routes.js';
+import adminDocumentsRoutes from './modules/admin/documents/documents.routes.js';
+import studentDocumentsRoutes from './modules/student/documents/documents.routes.js';
+import teacherDocumentsRoutes from './modules/teacher/documents/documents.routes.js';
 
 const app = express();
 
-app.use(helmet());
-app.use(cors({
-  origin: env.frontendUrl,
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow non-browser clients (no Origin header)
+    if (!origin) return callback(null, true);
+    if (env.frontendUrls.includes(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true,
-}));
+};
+
+app.use(helmet());
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(morgan(env.nodeEnv === 'development' ? 'dev' : 'combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -71,9 +82,12 @@ api.use('/admin/exams', requireRole('INSTITUTE_ADMIN', 'TEACHER'), adminExamsRou
 api.use('/admin/results', requireRole('INSTITUTE_ADMIN', 'TEACHER'), adminResultsRoutes);
 api.use('/admin/attendance', requireRole('INSTITUTE_ADMIN', 'TEACHER', 'RECEPTIONIST'), adminAttendanceRoutes);
 api.use('/admin/fees', requireRole('INSTITUTE_ADMIN', 'ACCOUNTANT'), adminFeesRoutes);
+api.use('/admin/documents', requireRole('INSTITUTE_ADMIN', 'HR', 'RECEPTIONIST'), adminDocumentsRoutes);
 
 api.use('/teacher', requireRole('TEACHER'), teacherPortalRoutes);
+api.use('/teacher/documents', requireRole('TEACHER'), teacherDocumentsRoutes);
 api.use('/student', requireRole('STUDENT'), studentPortalRoutes);
+api.use('/student/documents', requireRole('STUDENT'), studentDocumentsRoutes);
 
 app.use(`/api/${env.apiVersion}`, api);
 app.use(notFoundHandler);
