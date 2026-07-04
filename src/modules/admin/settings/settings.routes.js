@@ -5,6 +5,8 @@ import { requireModule } from '../../../middleware/moduleGuard.js';
 import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { AppError } from '../../../utils/AppError.js';
+import { documentUpload } from '../../../middleware/upload.js';
+import { uploadBuffer, isCloudinaryConfigured } from '../../../config/cloudinary.js';
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.PROFILE_SETTINGS));
@@ -38,6 +40,31 @@ router.put('/', async (req, res, next) => {
       include: { plan: true },
     });
     return success(res, institute, 'Profile updated');
+  } catch (err) { next(err); }
+});
+
+router.post('/logo', documentUpload.single('logo'), async (req, res, next) => {
+  try {
+    if (!isCloudinaryConfigured()) {
+      throw new AppError('File upload is not configured. Set Cloudinary credentials in server environment.', 503);
+    }
+    if (!req.file) throw new AppError('Logo image is required', 400);
+    if (!req.file.mimetype.startsWith('image/')) {
+      throw new AppError('Only image files are allowed for the logo', 400);
+    }
+
+    const result = await uploadBuffer(req.file.buffer, {
+      folder: 'academic-erp/logos',
+      transformation: [{ width: 512, height: 512, crop: 'limit' }],
+    });
+
+    const institute = await prisma.institute.update({
+      where: { id: req.user.instituteId },
+      data: { logo: result.secure_url },
+      include: { plan: true },
+    });
+
+    return success(res, { logo: institute.logo, institute }, 'Logo uploaded');
   } catch (err) { next(err); }
 });
 

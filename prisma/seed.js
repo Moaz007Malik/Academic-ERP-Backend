@@ -161,6 +161,7 @@ async function main() {
       data: {
         email: inst.adminEmail,
         passwordHash: adminPass,
+        portalPassword: 'Institute@123',
         firstName: inst.adminName.firstName,
         lastName: inst.adminName.lastName,
         role: 'INSTITUTE_ADMIN',
@@ -266,6 +267,11 @@ async function main() {
   console.log('Seed completed with dummy institutes, students, teachers, invoices & tickets.');
   console.log('Institute admin password (all): Institute@123');
 
+  // Backfill admin-visible passwords for existing demo users
+  await prisma.user.updateMany({ where: { role: 'INSTITUTE_ADMIN', portalPassword: null }, data: { portalPassword: 'Institute@123' } });
+  await prisma.user.updateMany({ where: { role: 'STUDENT', portalPassword: null }, data: { portalPassword: 'Student@123' } });
+  await prisma.user.updateMany({ where: { role: 'TEACHER', portalPassword: null }, data: { portalPassword: 'Teacher@123' } });
+
   await seedGreenfieldAcademic(now, addDays);
 }
 
@@ -287,9 +293,9 @@ async function seedGreenfieldAcademic(now, addDays) {
       if (!student) continue;
       const user = await prisma.user.upsert({
         where: { email: s.email },
-        update: { passwordHash: studentPass },
+        update: { passwordHash: studentPass, portalPassword: 'Student@123' },
         create: {
-          email: s.email, passwordHash: studentPass, firstName: s.firstName, lastName: s.lastName,
+          email: s.email, passwordHash: studentPass, portalPassword: 'Student@123', firstName: s.firstName, lastName: s.lastName,
           role: 'STUDENT', instituteId: institute.id,
         },
       });
@@ -298,9 +304,9 @@ async function seedGreenfieldAcademic(now, addDays) {
     const teacherPass = await bcrypt.hash('Teacher@123', 12);
     await prisma.user.upsert({
       where: { email: 'imran.qureshi@greenfield.edu.pk' },
-      update: { passwordHash: teacherPass },
+      update: { passwordHash: teacherPass, portalPassword: 'Teacher@123' },
       create: {
-        email: 'imran.qureshi@greenfield.edu.pk', passwordHash: teacherPass,
+        email: 'imran.qureshi@greenfield.edu.pk', passwordHash: teacherPass, portalPassword: 'Teacher@123',
         firstName: 'Dr. Imran', lastName: 'Qureshi', role: 'TEACHER', instituteId: institute.id,
       },
     });
@@ -365,6 +371,7 @@ async function seedGreenfieldAcademic(now, addDays) {
     data: {
       email: 'imran.qureshi@greenfield.edu.pk',
       passwordHash: teacherPass,
+      portalPassword: 'Teacher@123',
       firstName: 'Dr. Imran',
       lastName: 'Qureshi',
       role: 'TEACHER',
@@ -409,10 +416,11 @@ async function seedGreenfieldAcademic(now, addDays) {
     let student = await prisma.student.findFirst({ where: { instituteId: institute.id, rollNumber: s.rollNumber } });
     const user = await prisma.user.upsert({
       where: { email: s.email },
-      update: { passwordHash: studentPass },
+      update: { passwordHash: studentPass, portalPassword: 'Student@123' },
       create: {
         email: s.email,
         passwordHash: studentPass,
+        portalPassword: 'Student@123',
         firstName: s.firstName,
         lastName: s.lastName,
         role: 'STUDENT',

@@ -3,11 +3,13 @@ import { hashPassword } from '../modules/auth/auth.service.js';
 export async function createPortalUser(tx, {
   email, password, role, instituteId, firstName, lastName,
 }) {
-  const passwordHash = await hashPassword(password || 'Student@123');
+  const plainPassword = password || (role === 'TEACHER' ? 'Teacher@123' : 'Student@123');
+  const passwordHash = await hashPassword(plainPassword);
   return tx.user.create({
     data: {
       email: email.toLowerCase(),
       passwordHash,
+      portalPassword: plainPassword,
       role,
       instituteId,
       firstName,
@@ -15,6 +17,10 @@ export async function createPortalUser(tx, {
       mustChangePass: true,
     },
   });
+}
+
+export function generateTempPassword() {
+  return `Temp@${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function generateRollNumber(prefix, num) {

@@ -284,6 +284,8 @@ model User {
   institute      Institute? @relation(fields: [instituteId], references: [id])
   email          String    @unique @db.VarChar(200)
   passwordHash   String    @db.VarChar(500)
+  /** Institute-visible portal password (set on create/reset by admin only) */
+  portalPassword String?   @db.VarChar(200)
   firstName      String?   @db.VarChar(100)
   lastName       String?   @db.VarChar(100)
   role           UserRole

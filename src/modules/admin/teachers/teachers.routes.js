@@ -32,7 +32,7 @@ router.get('/', async (req, res, next) => {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          user: { select: { email: true } },
+          user: { select: { email: true, portalPassword: true } },
           assignments: { include: { subject: true, section: { include: { batch: true } } } },
         },
       }),
@@ -94,10 +94,13 @@ router.post('/', async (req, res, next) => {
           salary: salary != null ? salary : null,
           status: 'ACTIVE',
         },
-        include: { user: { select: { email: true } } },
+        include: { user: { select: { email: true, portalPassword: true } } },
       });
     });
-    return success(res, teacher, 'Teacher created', 201);
+    const portalCreds = teacher.user
+      ? { email: teacher.user.email, password: password || 'Teacher@123' }
+      : null;
+    return success(res, { teacher, portalCredentials: portalCreds }, 'Teacher created', 201);
   } catch (err) { next(err); }
 });
 

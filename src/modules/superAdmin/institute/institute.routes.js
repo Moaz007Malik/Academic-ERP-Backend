@@ -5,6 +5,7 @@ import { parsePagination, buildPaginationMeta } from '../../../utils/pagination.
 import { hashPassword } from '../../auth/auth.service.js';
 import { CORE_MODULES } from '../../../utils/constants.js';
 import { MODULE_CATALOG, summarizeModules, ALL_MODULE_KEYS } from '../../../utils/moduleCatalog.js';
+import { generateTempPassword } from '../../../utils/portalUser.js';
 import { AppError } from '../../../utils/AppError.js';
 
 const router = Router();
@@ -42,11 +43,38 @@ router.get('/:id', async (req, res, next) => {
   try {
     const institute = await prisma.institute.findFirst({
       where: { id: req.params.id, deletedAt: null },
-      include: { plan: true, subscriptionInvoices: { take: 10, orderBy: { issuedAt: 'desc' } } },
+      include: {
+        plan: true,
+        subscriptionInvoices: { take: 10, orderBy: { issuedAt: 'desc' } },
+        users: {
+          where: { role: 'INSTITUTE_ADMIN', isActive: true },
+          take: 1,
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            portalPassword: true,
+            mustChangePass: true,
+            lastLoginAt: true,
+          },
+        },
+        _count: { select: { students: true, teachers: true, users: true } },
+      },
     });
     if (!institute) throw new AppError('Institute not found', 404);
     const moduleSummary = summarizeModules(institute.activeModules);
-    return success(res, { ...institute, moduleSummary });
+    const adminUser = institute.users?.[0] || null;
+    const { users, ...rest } = institute;
+    return success(res, {
+      ...rest,
+      moduleSummary,
+      adminUser,
+      adminCredentials: adminUser
+        ? { email: adminUser.email, password: adminUser.portalPassword }
+        : null,
+    });
   } catch (err) {
     next(err);
   }
@@ -93,6 +121,7 @@ router.post('/', async (req, res, next) => {
         data: {
           email: adminEmail.toLowerCase(),
           passwordHash,
+          portalPassword: tempPassword,
           firstName: adminFirstName || 'Admin',
           lastName: adminLastName || '',
           role: 'INSTITUTE_ADMIN',
@@ -217,7 +246,7 @@ router.put('/:id/modules', async (req, res, next) => {
 
 router.put('/:id', async (req, res, next) => {
   try {
-    const { name, planId, activeModules, storageQuotaMB, expiryDate, status } = req.body;
+    const { name, planId, activeModules, storageQuotaMB, expiryDate, status, email, phone, address } = req.body;
     const institute = await prisma.institute.update({
       where: { id: req.params.id },
       data: {
@@ -227,10 +256,47 @@ router.put('/:id', async (req, res, next) => {
         ...(storageQuotaMB && { storageQuotaMB }),
         ...(expiryDate && { expiryDate: new Date(expiryDate) }),
         ...(status && { status }),
+        ...(email !== undefined && { email }),
+        ...(phone !== undefined && { phone }),
+        ...(address !== undefined && { address }),
       },
       include: { plan: true },
     });
     return success(res, institute, 'Institute updated');
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/reset-admin-password', async (req, res, next) => {
+  try {
+    const admin = await prisma.user.findFirst({
+      where: {
+        instituteId: req.params.id,
+        role: 'INSTITUTE_ADMIN',
+        isActive: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!admin) throw new AppError('Institute admin account not found', 404);
+
+    const newPassword = req.body.password?.trim() || generateTempPassword();
+    const passwordHash = await hashPassword(newPassword);
+
+    await prisma.user.update({
+      where: { id: admin.id },
+      data: {
+        passwordHash,
+        portalPassword: newPassword,
+        mustChangePass: true,
+      },
+    });
+
+    return success(res, {
+      email: admin.email,
+      password: newPassword,
+      name: `${admin.firstName || ''} ${admin.lastName || ''}`.trim(),
+    }, 'Institute admin password reset');
   } catch (err) {
     next(err);
   }

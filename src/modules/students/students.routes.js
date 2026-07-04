@@ -39,7 +39,7 @@ router.get('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) => 
         include: {
           currentBatch: true,
           currentSection: true,
-          user: { select: { email: true, id: true } },
+          user: { select: { email: true, id: true, portalPassword: true } },
         },
       }),
       prisma.student.count({ where }),
@@ -58,7 +58,7 @@ router.get('/:id', requirePermission('MANAGE_STUDENTS'), async (req, res, next) 
       include: {
         currentBatch: true,
         currentSection: true,
-        user: { select: { email: true, id: true } },
+        user: { select: { email: true, id: true, portalPassword: true } },
       },
     });
     if (!student) throw new AppError('Student not found', 404);
@@ -125,11 +125,15 @@ router.post('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) =>
           enrollmentDate: new Date(),
           status: 'ACTIVE',
         },
-        include: { currentBatch: true, currentSection: true, user: { select: { email: true } } },
+        include: { currentBatch: true, currentSection: true, user: { select: { email: true, portalPassword: true } } },
       });
     });
 
-    return success(res, student, 'Student created', 201);
+    const portalCreds = student.user
+      ? { email: student.user.email, password: password || 'Student@123' }
+      : null;
+
+    return success(res, { student, portalCredentials: portalCreds }, 'Student created', 201);
   } catch (err) {
     next(err);
   }
@@ -171,7 +175,7 @@ router.put('/:id', requirePermission('MANAGE_STUDENTS'), async (req, res, next) 
         ...(currentSectionId !== undefined && { currentSectionId: currentSectionId || null }),
         ...(status !== undefined && { status }),
       },
-      include: { currentBatch: true, currentSection: true, user: { select: { email: true } } },
+      include: { currentBatch: true, currentSection: true, user: { select: { email: true, portalPassword: true } } },
     });
 
     return success(res, student, 'Student updated');

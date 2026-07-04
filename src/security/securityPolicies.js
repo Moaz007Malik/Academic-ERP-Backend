@@ -3,6 +3,8 @@ import { prisma } from '../config/database.js';
 import { AppError } from '../utils/AppError.js';
 import { env } from '../config/env.js';
 
+import { validatePasswordStrength } from '../utils/passwordPolicy.js';
+
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
 const PASSWORD_HISTORY_COUNT = 5;
@@ -22,8 +24,9 @@ export async function isAccountLocked(email) {
 }
 
 export async function assertPasswordPolicy(userId, newPassword) {
-  if (newPassword.length < 8) {
-    throw new AppError('Password must be at least 8 characters', 400);
+  const strengthError = validatePasswordStrength(newPassword);
+  if (strengthError) {
+    throw new AppError(strengthError, 400);
   }
   const history = await prisma.passwordHistory.findMany({
     where: { userId },

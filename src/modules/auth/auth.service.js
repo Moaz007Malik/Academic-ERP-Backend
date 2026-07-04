@@ -125,6 +125,7 @@ export async function login({ email, password }, ip, userAgent) {
       mustChangePass: user.mustChangePass,
       modules: user.institute?.activeModules ?? [],
       instituteName: user.institute?.name ?? null,
+      instituteLogo: user.institute?.logo ?? null,
       instituteStatus,
       subscriptionExpiry: user.institute?.expiryDate ?? null,
       subscriptionExpired,
@@ -207,11 +208,13 @@ export async function getMe(userId) {
     subscriptionExpiry: user.institute?.expiryDate ?? null,
     portalRoute: getPortalRouteForRole(user.role),
     instituteName: user.institute?.name ?? null,
+    instituteLogo: user.institute?.logo ?? null,
     institute: user.institute
       ? {
           id: user.institute.id,
           name: user.institute.name,
           code: user.institute.instituteCode,
+          logo: user.institute.logo,
           status: user.institute.status,
           expiryDate: user.institute.expiryDate,
           plan: user.institute.plan?.name,
@@ -233,7 +236,7 @@ export async function changePassword(userId, currentPassword, newPassword) {
   const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
   await prisma.user.update({
     where: { id: userId },
-    data: { passwordHash, mustChangePass: false },
+    data: { passwordHash, mustChangePass: false, portalPassword: null },
   });
   await savePasswordHistory(userId, passwordHash);
 
