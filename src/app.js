@@ -66,7 +66,25 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.get('/', (_req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'Academic ERP API',
+    health: '/health',
+    api: `/api/${env.apiVersion}`,
+    auth: `/api/${env.apiVersion}/auth/login`,
+  });
+});
+
 const api = express.Router();
+
+api.get('/', (_req, res) => {
+  res.json({
+    status: 'ok',
+    version: env.apiVersion,
+    message: 'Use /auth/login to authenticate. Protected routes require a Bearer token.',
+  });
+});
 
 api.use('/auth', authRoutes);
 

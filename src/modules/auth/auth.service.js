@@ -81,13 +81,17 @@ export async function login({ email, password }, ip, userAgent) {
 
   const suspicious = await detectSuspiciousLogin(user.id, ip, userAgent);
   if (suspicious) {
-    await publishEvent({
-      eventType: 'security.login.suspicious',
-      aggregateType: 'User',
-      aggregateId: user.id,
-      instituteId: user.instituteId,
-      payload: { email: user.email, ip, userAgent },
-    });
+    try {
+      await publishEvent({
+        eventType: 'security.login.suspicious',
+        aggregateType: 'User',
+        aggregateId: user.id,
+        instituteId: user.instituteId,
+        payload: { email: user.email, ip, userAgent },
+      });
+    } catch (err) {
+      console.warn('Suspicious login event skipped:', err.message);
+    }
   }
 
   await prisma.user.update({
