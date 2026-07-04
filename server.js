@@ -4,6 +4,7 @@ import { connectRedis } from './src/config/redis.js';
 import { initJobQueue } from './src/jobs/jobQueue.js';
 import { prisma } from './src/config/database.js';
 import { execSync } from 'node:child_process';
+import { initSubscriptionCron } from './src/jobs/subscriptionCron.js';
 
 async function runMigrations() {
   if (process.env.SKIP_MIGRATIONS === 'true') return;
@@ -26,6 +27,8 @@ async function bootstrap() {
     await initJobQueue();
     await prisma.$connect();
     console.log('Database connected');
+
+    initSubscriptionCron();
 
     app.listen(env.port, () => {
       console.log(`Server running on port ${env.port} [${env.nodeEnv}]`);

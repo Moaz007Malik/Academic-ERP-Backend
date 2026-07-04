@@ -6,6 +6,7 @@ import { requireModule } from '../../../middleware/moduleGuard.js';
 import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { createPortalUser, generateEmployeeCode } from '../../../utils/portalUser.js';
+import { getTeacherProfile } from '../../../services/profile.service.js';
 import { AppError } from '../../../utils/AppError.js';
 
 const router = Router();
@@ -39,6 +40,14 @@ router.get('/', async (req, res, next) => {
       prisma.teacher.count({ where }),
     ]);
     return paginated(res, teachers, buildPaginationMeta(total, page, limit));
+  } catch (err) { next(err); }
+});
+
+router.get('/:id/profile', async (req, res, next) => {
+  try {
+    const profile = await getTeacherProfile(req.params.id, req.user.instituteId);
+    if (!profile) throw new AppError('Teacher not found', 404);
+    return success(res, profile);
   } catch (err) { next(err); }
 });
 

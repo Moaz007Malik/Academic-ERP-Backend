@@ -8,6 +8,7 @@ import { MODULE_KEYS } from '../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../middleware/subscriptionGuard.js';
 import { createPortalUser, generateRollNumber } from '../../utils/portalUser.js';
 import { AppError } from '../../utils/AppError.js';
+import { getStudentProfile } from '../../services/profile.service.js';
 
 const router = Router();
 
@@ -17,17 +18,27 @@ router.use(blockExpiredModuleAccess);
 router.get('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) => {
   try {
     const { page, limit, skip } = parsePagination(req.query);
-    const where = { instituteId: req.user.instituteId };
+    const where = { instituteId: req.user.instituteId, deletedAt: null };
 
     if (req.query.status) where.status = req.query.status;
     if (req.query.batchId) where.currentBatchId = req.query.batchId;
     if (req.query.sectionId) where.currentSectionId = req.query.sectionId;
+    if (req.query.sessionId) {
+      where.currentBatch = { sessionId: req.query.sessionId };
+    }
     if (req.query.search) {
       where.OR = [
         { firstName: { contains: req.query.search, mode: 'insensitive' } },
         { lastName: { contains: req.query.search, mode: 'insensitive' } },
         { rollNumber: { contains: req.query.search, mode: 'insensitive' } },
+        { registrationNumber: { contains: req.query.search, mode: 'insensitive' } },
+        { admissionNumber: { contains: req.query.search, mode: 'insensitive' } },
       ];
+    }
+
+    // Require session → class → section unless searching
+    if (!req.query.search && (!req.query.batchId || !req.query.sectionId)) {
+      return paginated(res, [], buildPaginationMeta(0, page, limit), 'Select class and section to view students');
     }
 
     const [students, total] = await Promise.all([
@@ -46,6 +57,16 @@ router.get('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) => 
     ]);
 
     return paginated(res, students, buildPaginationMeta(total, page, limit));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:id/profile', requirePermission('MANAGE_STUDENTS'), async (req, res, next) => {
+  try {
+    const profile = await getStudentProfile(req.params.id, req.user.instituteId);
+    if (!profile) throw new AppError('Student not found', 404);
+    return success(res, profile);
   } catch (err) {
     next(err);
   }
@@ -149,6 +170,8 @@ router.put('/:id', requirePermission('MANAGE_STUDENTS'), async (req, res, next) 
     const {
       firstName, lastName, rollNumber, dateOfBirth, gender, cnic, phone, address,
       guardianName, guardianPhone, currentBatchId, currentSectionId, status,
+      registrationNumber, admissionNumber, bloodGroup, fatherName, motherName,
+      guardianRelation, guardianEmail, notes,
     } = req.body;
 
     if (rollNumber && rollNumber !== existing.rollNumber) {
@@ -171,6 +194,14 @@ router.put('/:id', requirePermission('MANAGE_STUDENTS'), async (req, res, next) 
         ...(address !== undefined && { address }),
         ...(guardianName !== undefined && { guardianName }),
         ...(guardianPhone !== undefined && { guardianPhone }),
+        ...(registrationNumber !== undefined && { registrationNumber }),
+        ...(admissionNumber !== undefined && { admissionNumber }),
+        ...(bloodGroup !== undefined && { bloodGroup }),
+        ...(fatherName !== undefined && { fatherName }),
+        ...(motherName !== undefined && { motherName }),
+        ...(guardianRelation !== undefined && { guardianRelation }),
+        ...(guardianEmail !== undefined && { guardianEmail }),
+        ...(notes !== undefined && { notes }),
         ...(currentBatchId !== undefined && { currentBatchId: currentBatchId || null }),
         ...(currentSectionId !== undefined && { currentSectionId: currentSectionId || null }),
         ...(status !== undefined && { status }),

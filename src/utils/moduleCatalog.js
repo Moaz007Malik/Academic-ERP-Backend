@@ -31,6 +31,7 @@ export const MODULE_CATALOG = [
   { key: MODULE_KEYS.PLACEMENT, label: 'Placement', category: 'Community', description: 'Job placement tracking' },
   { key: MODULE_KEYS.RESEARCH, label: 'Research', category: 'Academic', description: 'Research projects' },
   { key: MODULE_KEYS.PROFILE_SETTINGS, label: 'Profile Settings', category: 'System', description: 'Institute profile and preferences' },
+  { key: MODULE_KEYS.INDIVIDUAL_COURSES, label: 'Individual Courses', category: 'Academic', description: 'Short courses independent of class/batch system' },
 ];
 
 export const ALL_MODULE_KEYS = MODULE_CATALOG.map((m) => m.key);

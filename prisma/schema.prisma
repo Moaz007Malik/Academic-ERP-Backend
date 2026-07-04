@@ -224,6 +224,7 @@ model Institute {
   supportTickets     SupportTicket[]
   auditLogs          AuditLog[]
   subscriptionInvoices SubscriptionInvoice[]
+  individualCourses    IndividualCourse[]
   teacherAssignments TeacherAssignment[]
   personDocuments    PersonDocument[]
   feeRequests        FeeRequest[]
@@ -342,6 +343,7 @@ model Department {
   createdAt   DateTime  @default(now())
 
   courses Course[]
+  teachers Teacher[]
 
   @@index([instituteId])
 }
@@ -471,6 +473,14 @@ model Student {
   photo            String?       @db.VarChar(500)
   guardianName     String?       @db.VarChar(200)
   guardianPhone    String?       @db.VarChar(20)
+  guardianRelation String?       @db.VarChar(50)
+  guardianEmail    String?       @db.VarChar(200)
+  fatherName       String?       @db.VarChar(200)
+  motherName       String?       @db.VarChar(200)
+  registrationNumber String?     @db.VarChar(50)
+  admissionNumber  String?       @db.VarChar(50)
+  bloodGroup       String?       @db.VarChar(10)
+  notes            String?
   enrollmentDate   DateTime?     @db.Date
   status           StudentStatus @default(ACTIVE)
   deletedAt        DateTime?
@@ -496,6 +506,9 @@ model Student {
   quizAnswers         QuizAnswer[]
   biometricLogs       BiometricLog[]
   dataConsents        DataConsent[]
+  promotions          StudentPromotion[]
+  studentNotes        StudentNote[]
+  courseEnrollments   IndividualCourseEnrollment[]
 
   @@unique([instituteId, rollNumber])
   @@index([instituteId, deletedAt])
@@ -512,6 +525,17 @@ model Teacher {
   lastName       String        @db.VarChar(100)
   qualification  String?       @db.VarChar(200)
   specialization String?       @db.VarChar(200)
+  departmentId   String?
+  department     Department?   @relation(fields: [departmentId], references: [id])
+  designation    String?       @db.VarChar(100)
+  employmentType String?       @db.VarChar(50)
+  experienceYears Int?
+  phone          String?       @db.VarChar(20)
+  photo          String?       @db.VarChar(500)
+  paymentMethod  String?       @db.VarChar(50)
+  allowances     Decimal?      @db.Decimal(10, 2)
+  deductions     Decimal?      @db.Decimal(10, 2)
+  notes          String?
   joiningDate    DateTime?     @db.Date
   salary         Decimal?      @db.Decimal(10, 2)
   status         TeacherStatus @default(ACTIVE)
@@ -525,7 +549,105 @@ model Teacher {
   leaveRequests LeaveRequest[]
   assignments   TeacherAssignment[]
   documents     PersonDocument[]
+  individualCourses IndividualCourseTeacher[]
 
+  @@index([instituteId])
+}
+
+model StudentPromotion {
+  id            String   @id @default(uuid())
+  instituteId   String
+  studentId     String
+  student       Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  fromBatchId   String?
+  toBatchId     String?
+  fromSectionId String?
+  toSectionId   String?
+  sessionName   String?  @db.VarChar(100)
+  promotedAt    DateTime @default(now())
+  notes         String?
+
+  @@index([studentId])
+}
+
+model StudentNote {
+  id          String   @id @default(uuid())
+  instituteId String
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  authorId    String?
+  content     String
+  createdAt   DateTime @default(now())
+
+  @@index([studentId])
+}
+
+enum IndividualCourseStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum CourseEnrollmentStatus {
+  ENROLLED
+  COMPLETED
+  DROPPED
+  SUSPENDED
+}
+
+model IndividualCourse {
+  id                String                 @id @default(uuid())
+  instituteId       String
+  institute         Institute              @relation(fields: [instituteId], references: [id])
+  name              String                 @db.VarChar(200)
+  code              String                 @db.VarChar(50)
+  duration          String?                @db.VarChar(100)
+  startDate         DateTime?
+  endDate           DateTime?
+  capacity          Int                    @default(30)
+  description       String?
+  status            IndividualCourseStatus @default(ACTIVE)
+  admissionFee      Decimal                @default(0) @db.Decimal(10, 2)
+  monthlyFee        Decimal                @default(0) @db.Decimal(10, 2)
+  oneTimeFee        Decimal                @default(0) @db.Decimal(10, 2)
+  discountAmount    Decimal                @default(0) @db.Decimal(10, 2)
+  scholarshipAmount Decimal                @default(0) @db.Decimal(10, 2)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  teachers    IndividualCourseTeacher[]
+  enrollments IndividualCourseEnrollment[]
+
+  @@unique([instituteId, code])
+  @@index([instituteId, status])
+}
+
+model IndividualCourseTeacher {
+  id        String           @id @default(uuid())
+  courseId  String
+  course    IndividualCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  teacherId String
+  teacher   Teacher          @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  createdAt DateTime         @default(now())
+
+  @@unique([courseId, teacherId])
+}
+
+model IndividualCourseEnrollment {
+  id          String                 @id @default(uuid())
+  instituteId String
+  courseId    String
+  course      IndividualCourse       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  studentId   String
+  student     Student                @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status      CourseEnrollmentStatus @default(ENROLLED)
+  enrolledAt  DateTime               @default(now())
+  feePaid     Decimal                @default(0) @db.Decimal(10, 2)
+  feeDue      Decimal                @default(0) @db.Decimal(10, 2)
+  notes       String?
+
+  @@unique([courseId, studentId])
   @@index([instituteId])
 }
 
@@ -780,6 +902,7 @@ model SubscriptionInvoice {
   status        InvoiceStatus    @default(PENDING)
   issuedAt      DateTime         @default(now())
   dueDate       DateTime?
+  graceEndsAt   DateTime?
   paidAt        DateTime?
   paymentRef    String?          @db.VarChar(200)
   paymentProof  String?          @db.VarChar(500)

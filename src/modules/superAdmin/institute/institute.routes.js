@@ -6,6 +6,7 @@ import { hashPassword } from '../../auth/auth.service.js';
 import { CORE_MODULES } from '../../../utils/constants.js';
 import { MODULE_CATALOG, summarizeModules, ALL_MODULE_KEYS } from '../../../utils/moduleCatalog.js';
 import { generateTempPassword } from '../../../utils/portalUser.js';
+import { createInitialSubscriptionInvoice } from '../../../services/subscription.service.js';
 import { AppError } from '../../../utils/AppError.js';
 
 const router = Router();
@@ -132,6 +133,16 @@ router.post('/', async (req, res, next) => {
 
       return inst;
     });
+
+    if (planId && plan) {
+      await createInitialSubscriptionInvoice(
+        institute.id,
+        planId,
+        plan.price,
+        req.user.id,
+        institute.expiryDate,
+      );
+    }
 
     return success(res, {
       institute,
