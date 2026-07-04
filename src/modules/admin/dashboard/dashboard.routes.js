@@ -3,6 +3,8 @@ import { prisma } from '../../../config/database.js';
 import { success } from '../../../utils/response.js';
 import { isSubscriptionExpired } from '../../../utils/instituteAccess.js';
 
+import { summarizeModules } from '../../../utils/moduleCatalog.js';
+
 const router = Router();
 
 router.get('/', async (req, res, next) => {
@@ -49,6 +51,7 @@ router.get('/', async (req, res, next) => {
     ]);
 
     const expired = institute ? isSubscriptionExpired(institute) : false;
+    const moduleSummary = institute ? summarizeModules(institute.activeModules) : null;
 
     return success(res, {
       totalStudents,
@@ -58,6 +61,7 @@ router.get('/', async (req, res, next) => {
       outstandingFees: Number(outstandingFees._sum.amount || 0),
       upcomingExams,
       openTickets,
+      modules: moduleSummary,
       subscription: institute
         ? {
             status: expired && institute.status === 'ACTIVE' ? 'EXPIRED' : institute.status,

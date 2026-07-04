@@ -27,6 +27,13 @@ import adminExamsRoutes from './modules/admin/exams/exams.routes.js';
 import adminResultsRoutes from './modules/admin/results/results.routes.js';
 import adminAttendanceRoutes from './modules/admin/attendance/attendance.routes.js';
 import adminFeesRoutes from './modules/admin/fees/fees.routes.js';
+import adminSettingsRoutes from './modules/admin/settings/settings.routes.js';
+import adminIdCardRoutes from './modules/admin/idcard/idcard.routes.js';
+import saModulesRoutes from './modules/superAdmin/modules/modules.routes.js';
+import enterpriseWorkflowsRoutes from './modules/enterprise/workflows/workflows.routes.js';
+import enterpriseFormsRoutes from './modules/enterprise/forms/forms.routes.js';
+import enterpriseAnalyticsRoutes from './modules/enterprise/analytics/analytics.routes.js';
+import enterpriseComplianceRoutes from './modules/enterprise/compliance/compliance.routes.js';
 import teacherPortalRoutes from './modules/teacher/portal/portal.routes.js';
 import studentPortalRoutes from './modules/student/portal/portal.routes.js';
 import adminDocumentsRoutes from './modules/admin/documents/documents.routes.js';
@@ -68,6 +75,7 @@ api.use(subscriptionGuard);
 
 api.use('/sa/dashboard', requireSuperAdmin, saDashboardRoutes);
 api.use('/sa/institutes', requireSuperAdmin, saInstituteRoutes);
+api.use('/sa/modules', requireSuperAdmin, saModulesRoutes);
 api.use('/sa/plans', requireSuperAdmin, saPlansRoutes);
 api.use('/sa/invoices', requireSuperAdmin, saInvoiceRoutes);
 api.use('/sa/tickets', requireSuperAdmin, saTicketRoutes);
@@ -82,6 +90,13 @@ api.use('/admin/exams', requireRole('INSTITUTE_ADMIN', 'TEACHER'), adminExamsRou
 api.use('/admin/results', requireRole('INSTITUTE_ADMIN', 'TEACHER'), adminResultsRoutes);
 api.use('/admin/attendance', requireRole('INSTITUTE_ADMIN', 'TEACHER', 'RECEPTIONIST'), adminAttendanceRoutes);
 api.use('/admin/fees', requireRole('INSTITUTE_ADMIN', 'ACCOUNTANT'), adminFeesRoutes);
+api.use('/admin/settings', requireRole('INSTITUTE_ADMIN'), adminSettingsRoutes);
+api.use('/admin/idcard', requireRole('INSTITUTE_ADMIN', 'RECEPTIONIST'), adminIdCardRoutes);
+
+api.use('/admin/workflows', requireRole('INSTITUTE_ADMIN', 'HR', 'ACCOUNTANT', 'RECEPTIONIST'), enterpriseWorkflowsRoutes);
+api.use('/admin/forms', requireRole('INSTITUTE_ADMIN', 'RECEPTIONIST'), enterpriseFormsRoutes);
+api.use('/admin/analytics', requireRole('INSTITUTE_ADMIN', 'ACCOUNTANT'), enterpriseAnalyticsRoutes);
+api.use('/admin/compliance', requireRole('INSTITUTE_ADMIN'), enterpriseComplianceRoutes);
 api.use('/admin/documents', requireRole('INSTITUTE_ADMIN', 'HR', 'RECEPTIONIST'), adminDocumentsRoutes);
 
 api.use('/teacher', requireRole('TEACHER'), teacherPortalRoutes);

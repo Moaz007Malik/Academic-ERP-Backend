@@ -1,10 +1,13 @@
 import { Router } from 'express';
 import { prisma } from '../../../config/database.js';
 import { success } from '../../../utils/response.js';
+import { requireModule } from '../../../middleware/moduleGuard.js';
+import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { AppError } from '../../../utils/AppError.js';
 
 const router = Router();
+router.use(requireModule(MODULE_KEYS.STUDENT_MANAGEMENT));
 router.use(blockExpiredModuleAccess);
 
 async function owned(model, id, instituteId) {

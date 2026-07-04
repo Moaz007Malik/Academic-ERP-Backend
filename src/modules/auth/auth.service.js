@@ -16,22 +16,40 @@ import {
 } from '../../services/token.service.js';
 import { isRedisReady } from '../../config/redis.js';
 import { writeAuditLog } from '../../services/audit.service.js';
+import { publishEvent } from '../../events/eventBus.js';
 
 const BCRYPT_ROUNDS = 12;
 const OTP_PREFIX = 'otp:';
 
 export async function login({ email, password }, ip, userAgent) {
+  const { isAccountLocked, recordLoginAttempt, assertIpWhitelist, detectSuspiciousLogin, createUserSession } =
+    await import('../../security/securityPolicies.js');
+
+  if (await isAccountLocked(email)) {
+    throw new AppError('Account temporarily locked due to failed login attempts', 429);
+  }
+
   const user = await prisma.user.findUnique({
     where: { email: email.toLowerCase() },
     include: { institute: true },
   });
 
   if (!user || !user.isActive) {
+    await recordLoginAttempt(email, ip, false, 'INVALID_CREDENTIALS');
     throw new AppError('Invalid email or password', 401);
   }
 
+  if (user.instituteId) {
+    await assertIpWhitelist(user.instituteId, ip);
+  }
+
   const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) throw new AppError('Invalid email or password', 401);
+  if (!valid) {
+    await recordLoginAttempt(email, ip, false, 'INVALID_PASSWORD');
+    throw new AppError('Invalid email or password', 401);
+  }
+
+  await recordLoginAttempt(email, ip, true);
 
   const portalRoute = getPortalRouteForRole(user.role);
   if (portalRoute === '/login') {
@@ -54,6 +72,23 @@ export async function login({ email, password }, ip, userAgent) {
   const accessToken = signAccessToken(tokenPayload);
   const refreshToken = signRefreshToken({ userId: user.id });
   await storeRefreshToken(user.id, refreshToken);
+
+  await createUserSession(user.id, {
+    ipAddress: ip,
+    userAgent,
+    deviceType: 'web',
+  });
+
+  const suspicious = await detectSuspiciousLogin(user.id, ip, userAgent);
+  if (suspicious) {
+    await publishEvent({
+      eventType: 'security.login.suspicious',
+      aggregateType: 'User',
+      aggregateId: user.id,
+      instituteId: user.instituteId,
+      payload: { email: user.email, ip, userAgent },
+    });
+  }
 
   await prisma.user.update({
     where: { id: user.id },
@@ -186,17 +221,21 @@ export async function getMe(userId) {
 }
 
 export async function changePassword(userId, currentPassword, newPassword) {
+  const { assertPasswordPolicy, savePasswordHistory } = await import('../../security/securityPolicies.js');
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new AppError('User not found', 404);
 
   const valid = await bcrypt.compare(currentPassword, user.passwordHash);
   if (!valid) throw new AppError('Current password is incorrect', 400);
 
+  await assertPasswordPolicy(userId, newPassword);
+
   const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
   await prisma.user.update({
     where: { id: userId },
     data: { passwordHash, mustChangePass: false },
   });
+  await savePasswordHistory(userId, passwordHash);
 
   await revokeAllUserTokens(userId);
 }

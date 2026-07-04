@@ -1,10 +1,13 @@
 import { Router } from 'express';
 import { prisma } from '../../../config/database.js';
 import { success } from '../../../utils/response.js';
+import { requireModule } from '../../../middleware/moduleGuard.js';
+import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { AppError } from '../../../utils/AppError.js';
 
 const router = Router();
+router.use(requireModule(MODULE_KEYS.TEACHER_PORTAL));
 router.use(blockExpiredModuleAccess);
 
 async function getTeacher(req) {
@@ -207,6 +210,83 @@ router.get('/exams', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
     return success(res, exams);
+  } catch (err) { next(err); }
+});
+
+router.get('/timetable', async (req, res, next) => {
+  try {
+    const teacher = await getTeacher(req);
+    const sectionIds = [...new Set(teacher.assignments.map((a) => a.sectionId))];
+    const timetable = await prisma.timetable.findMany({
+      where: {
+        instituteId: req.user.instituteId,
+        OR: [
+          { teacherId: teacher.id },
+          { sectionId: { in: sectionIds } },
+        ],
+      },
+      include: { subject: true, section: { include: { batch: true } } },
+      orderBy: [{ dayOfWeek: 'asc' }],
+    });
+    return success(res, timetable);
+  } catch (err) { next(err); }
+});
+
+router.get('/salary', async (req, res, next) => {
+  try {
+    const teacher = await getTeacher(req);
+    const salaries = await prisma.salary.findMany({
+      where: { teacherId: teacher.id, instituteId: req.user.instituteId },
+      orderBy: [{ year: 'desc' }, { month: 'desc' }],
+    });
+    return success(res, salaries);
+  } catch (err) { next(err); }
+});
+
+router.get('/leave', async (req, res, next) => {
+  try {
+    const teacher = await getTeacher(req);
+    const leaves = await prisma.leaveRequest.findMany({
+      where: { teacherId: teacher.id, instituteId: req.user.instituteId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return success(res, leaves);
+  } catch (err) { next(err); }
+});
+
+router.post('/leave', async (req, res, next) => {
+  try {
+    const teacher = await getTeacher(req);
+    const { leaveType, startDate, endDate, reason } = req.body;
+    if (!leaveType || !startDate || !endDate) throw new AppError('leaveType, startDate, endDate required', 400);
+    const leave = await prisma.leaveRequest.create({
+      data: {
+        instituteId: req.user.instituteId,
+        userId: req.user.id,
+        teacherId: teacher.id,
+        leaveType,
+        startDate: new Date(startDate),
+        endDate: new Date(endDate),
+        reason: reason || null,
+      },
+    });
+    return success(res, leave, 'Leave request submitted', 201);
+  } catch (err) { next(err); }
+});
+
+router.get('/attendance/self', async (req, res, next) => {
+  try {
+    const teacher = await getTeacher(req);
+    const records = await prisma.attendance.findMany({
+      where: {
+        instituteId: req.user.instituteId,
+        markedById: req.user.id,
+      },
+      distinct: ['date'],
+      orderBy: { date: 'desc' },
+      take: 30,
+    });
+    return success(res, { teacherId: teacher.id, recentMarkingDays: records.length });
   } catch (err) { next(err); }
 });
 

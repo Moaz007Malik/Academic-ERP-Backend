@@ -4,6 +4,7 @@ import { success, paginated } from '../../../utils/response.js';
 import { parsePagination, buildPaginationMeta } from '../../../utils/pagination.js';
 import { hashPassword } from '../../auth/auth.service.js';
 import { CORE_MODULES } from '../../../utils/constants.js';
+import { MODULE_CATALOG, summarizeModules, ALL_MODULE_KEYS } from '../../../utils/moduleCatalog.js';
 import { AppError } from '../../../utils/AppError.js';
 
 const router = Router();
@@ -44,7 +45,8 @@ router.get('/:id', async (req, res, next) => {
       include: { plan: true, subscriptionInvoices: { take: 10, orderBy: { issuedAt: 'desc' } } },
     });
     if (!institute) throw new AppError('Institute not found', 404);
-    return success(res, institute);
+    const moduleSummary = summarizeModules(institute.activeModules);
+    return success(res, { ...institute, moduleSummary });
   } catch (err) {
     next(err);
   }
@@ -67,13 +69,20 @@ router.post('/', async (req, res, next) => {
     const tempPassword = `Temp@${Math.random().toString(36).slice(2, 10)}`;
     const passwordHash = await hashPassword(tempPassword);
 
+    const plan = planId
+      ? await prisma.subscriptionPlan.findUnique({ where: { id: planId } })
+      : null;
+
+    const modulesFromPlan = plan?.allowedModules?.length ? plan.allowedModules : CORE_MODULES;
+    const resolvedModules = activeModules?.length ? activeModules : modulesFromPlan;
+
     const institute = await prisma.$transaction(async (tx) => {
       const inst = await tx.institute.create({
         data: {
           name,
           instituteCode,
           planId: planId || null,
-          activeModules: activeModules || CORE_MODULES,
+          activeModules: resolvedModules,
           storageQuotaMB: storageQuotaMB || 5120,
           expiryDate: expiryDate ? new Date(expiryDate) : null,
           email: adminEmail,
@@ -181,6 +190,26 @@ router.put('/:id/renew', async (req, res, next) => {
     }
 
     return success(res, institute, 'Subscription renewed — institute access restored');
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/:id/modules', async (req, res, next) => {
+  try {
+    const { activeModules } = req.body;
+    if (!Array.isArray(activeModules)) {
+      throw new AppError('activeModules array is required', 400);
+    }
+    const invalid = activeModules.filter((m) => !ALL_MODULE_KEYS.includes(m));
+    if (invalid.length) throw new AppError(`Unknown modules: ${invalid.join(', ')}`, 400);
+
+    const institute = await prisma.institute.update({
+      where: { id: req.params.id },
+      data: { activeModules },
+      include: { plan: true },
+    });
+    return success(res, { ...institute, moduleSummary: summarizeModules(institute.activeModules) }, 'Modules updated');
   } catch (err) {
     next(err);
   }

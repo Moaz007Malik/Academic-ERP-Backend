@@ -20,7 +20,10 @@ async function main() {
       price: 5000,
       storageQuotaMB: 5120,
       maxUsers: 500,
-      allowedModules: CORE_MODULES,
+      allowedModules: [
+        ...CORE_MODULES,
+        'STUDENT_PORTAL', 'TEACHER_PORTAL', 'TICKETS', 'PROFILE_SETTINGS',
+      ],
     },
     {
       name: 'Premium',
@@ -30,8 +33,9 @@ async function main() {
       maxUsers: 5000,
       allowedModules: [
         ...CORE_MODULES,
-        'TIMETABLE', 'LIBRARY', 'PARENT_PORTAL', 'STUDENT_PORTAL',
-        'ASSIGNMENTS_QUIZ', 'ADMISSION', 'CERTIFICATES',
+        'TIMETABLE', 'LIBRARY', 'PARENT_PORTAL', 'STUDENT_PORTAL', 'TEACHER_PORTAL',
+        'ASSIGNMENTS_QUIZ', 'ADMISSION', 'CERTIFICATES', 'ID_CARD_DESIGNER',
+        'TICKETS', 'PROFILE_SETTINGS', 'REPORTS', 'EMAIL_NOTIFICATIONS',
       ],
     },
     {
@@ -43,8 +47,10 @@ async function main() {
       allowedModules: [
         ...CORE_MODULES,
         'TIMETABLE', 'LIBRARY', 'HOSTEL', 'TRANSPORT', 'HR_PAYROLL',
-        'PARENT_PORTAL', 'STUDENT_PORTAL', 'LMS', 'ASSIGNMENTS_QUIZ',
+        'PARENT_PORTAL', 'STUDENT_PORTAL', 'TEACHER_PORTAL', 'LMS', 'ASSIGNMENTS_QUIZ',
         'ADMISSION', 'INVENTORY', 'CERTIFICATES', 'ONLINE_CLASSES',
+        'ID_CARD_DESIGNER', 'TICKETS', 'PROFILE_SETTINGS', 'REPORTS',
+        'EMAIL_NOTIFICATIONS', 'SMS_NOTIFICATIONS', 'DOCUMENT_MANAGEMENT',
       ],
     },
   ];

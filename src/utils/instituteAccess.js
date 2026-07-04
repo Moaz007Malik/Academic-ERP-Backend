@@ -24,6 +24,8 @@ export function getInstituteAccessState(institute) {
   };
 }
 
+import { assertPortalModuleAccess } from './moduleCatalog.js';
+
 export function assertLoginAccess(user) {
   if (user.role === 'SUPER_ADMIN') return { portalRoute: null, subscriptionExpired: false };
 
@@ -32,6 +34,21 @@ export function assertLoginAccess(user) {
   }
 
   const access = getInstituteAccessState(user.institute);
+  const activeModules = user.institute.activeModules || [];
+
+  const portalRoleMap = {
+    STUDENT: 'STUDENT',
+    PARENT: 'PARENT',
+    TEACHER: 'TEACHER',
+  };
+  const portalRole = portalRoleMap[user.role];
+  if (portalRole && !assertPortalModuleAccess(portalRole, activeModules)) {
+    const label = portalRole === 'STUDENT' ? 'Student Portal' : portalRole === 'PARENT' ? 'Parent Portal' : 'Teacher Portal';
+    throw Object.assign(
+      new Error(`${label} access is disabled for your institute. Contact your administrator.`),
+      { statusCode: 403 }
+    );
+  }
 
   if (access.blocked) {
     throw Object.assign(

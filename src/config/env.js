@@ -38,6 +38,8 @@ export const env = {
   },
   redisEnabled: parseBool(process.env.REDIS_ENABLED, false),
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
+  queueEnabled: parseBool(process.env.QUEUE_ENABLED, false),
+  fieldEncryptionKey: process.env.FIELD_ENCRYPTION_KEY || null,
   /** @deprecated use frontendUrls */
   frontendUrl: frontendUrls[0],
   frontendUrls,

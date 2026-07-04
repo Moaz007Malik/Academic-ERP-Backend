@@ -7,6 +7,15 @@ export function requireModule(moduleKey) {
 
     if (req.user.role === 'SUPER_ADMIN') return next();
 
+    // Allow support tickets when subscription expired (renewal support path)
+    if (
+      moduleKey === MODULE_KEYS.TICKETS
+      && req.subscriptionExpired
+      && req.user.role === 'INSTITUTE_ADMIN'
+    ) {
+      return next();
+    }
+
     const modules = req.user.activeModules || [];
     if (!modules.includes(moduleKey)) {
       return next(new AppError('Module not enabled for your subscription', 403));
