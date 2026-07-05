@@ -241,15 +241,25 @@ router.put('/:id/modules', async (req, res, next) => {
     if (!Array.isArray(activeModules)) {
       throw new AppError('activeModules array is required', 400);
     }
+    const valid = activeModules.filter((m) => ALL_MODULE_KEYS.includes(m));
     const invalid = activeModules.filter((m) => !ALL_MODULE_KEYS.includes(m));
-    if (invalid.length) throw new AppError(`Unknown modules: ${invalid.join(', ')}`, 400);
+    if (invalid.length) {
+      console.warn(`Stripping unknown module keys: ${invalid.join(', ')}`);
+    }
+    if (!valid.length && activeModules.length) {
+      throw new AppError(`Unknown modules: ${invalid.join(', ')}. Deploy the latest backend to enable new modules.`, 400);
+    }
 
     const institute = await prisma.institute.update({
       where: { id: req.params.id },
-      data: { activeModules },
+      data: { activeModules: valid },
       include: { plan: true },
     });
-    return success(res, { ...institute, moduleSummary: summarizeModules(institute.activeModules) }, 'Modules updated');
+    return success(res, {
+      ...institute,
+      moduleSummary: summarizeModules(institute.activeModules),
+      strippedModules: invalid,
+    }, invalid.length ? 'Modules updated (some unknown keys were skipped)' : 'Modules updated');
   } catch (err) {
     next(err);
   }

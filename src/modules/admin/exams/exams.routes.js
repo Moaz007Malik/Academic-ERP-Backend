@@ -91,10 +91,50 @@ router.get('/:id', async (req, res, next) => {
   try {
     const exam = await prisma.exam.findFirst({
       where: { id: req.params.id, instituteId: req.user.instituteId },
-      include: { section: { include: { batch: true } }, semester: true },
+      include: { section: { include: { batch: { include: { session: true } } } }, semester: true },
     });
     if (!exam) throw new AppError('Exam not found', 404);
-    return success(res, exam);
+
+    if (req.query.include !== 'analytics') {
+      return success(res, exam);
+    }
+
+    const results = await prisma.result.findMany({
+      where: { examId: exam.id, instituteId: req.user.instituteId },
+      include: { student: true, subject: true },
+    });
+
+    const byStudent = {};
+    for (const r of results) {
+      if (!byStudent[r.studentId]) {
+        byStudent[r.studentId] = { student: r.student, subjects: [], totalObtained: 0, totalMax: 0 };
+      }
+      const obtained = Number(r.totalMarks || 0);
+      const max = Number(r.maxMarks || 0);
+      byStudent[r.studentId].subjects.push({
+        subject: r.subject?.name, obtained, max, grade: r.grade, position: r.position, isPassed: r.isPassed,
+      });
+      byStudent[r.studentId].totalObtained += obtained;
+      byStudent[r.studentId].totalMax += max;
+    }
+
+    const studentResults = Object.values(byStudent).map((s) => ({
+      ...s,
+      percentage: s.totalMax ? Math.round((s.totalObtained / s.totalMax) * 100) : 0,
+    })).sort((a, b) => b.totalObtained - a.totalObtained);
+    studentResults.forEach((s, i) => { s.rank = i + 1; });
+
+    const marks = studentResults.map((s) => s.totalObtained).filter(Boolean);
+    const stats = {
+      totalStudents: studentResults.length,
+      passed: studentResults.filter((s) => s.percentage >= (exam.passPercentage || 33)).length,
+      failed: studentResults.filter((s) => s.percentage < (exam.passPercentage || 33)).length,
+      highest: marks.length ? Math.max(...marks) : 0,
+      lowest: marks.length ? Math.min(...marks) : 0,
+      average: marks.length ? Math.round(marks.reduce((a, b) => a + b, 0) / marks.length) : 0,
+    };
+
+    return success(res, { exam, studentResults, stats });
   } catch (err) { next(err); }
 });
 

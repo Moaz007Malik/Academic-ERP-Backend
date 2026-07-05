@@ -36,8 +36,8 @@ router.get('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) => 
       ];
     }
 
-    // Require session → class → section unless searching
-    if (!req.query.search && (!req.query.batchId || !req.query.sectionId)) {
+    // Require at least section, batch, or search (sectionId alone for attendance etc.)
+    if (!req.query.search?.trim() && !req.query.sectionId && !req.query.batchId) {
       return paginated(res, [], buildPaginationMeta(0, page, limit), 'Select class and section to view students');
     }
 

@@ -274,10 +274,12 @@ router.delete('/subjects/:id', async (req, res, next) => {
   try {
     const instituteId = req.user.instituteId;
     await owned(prisma.subject, req.params.id, instituteId);
-    const linked = await prisma.teacherAssignment.count({ where: { subjectId: req.params.id, instituteId } });
-    if (linked) throw new AppError('Cannot delete: subject is assigned to teachers', 400);
+    await prisma.teacherAssignment.deleteMany({ where: { subjectId: req.params.id, instituteId } });
+    await prisma.attendance.deleteMany({ where: { subjectId: req.params.id, instituteId } });
+    await prisma.result.deleteMany({ where: { subjectId: req.params.id, instituteId } });
+    await prisma.timetable.deleteMany({ where: { subjectId: req.params.id, instituteId } });
     await prisma.subject.delete({ where: { id: req.params.id } });
-    return success(res, null, 'Subject deleted');
+    return success(res, null, 'Subject deleted and teacher assignments removed');
   } catch (err) { next(err); }
 });
 
@@ -322,6 +324,12 @@ router.delete('/batches/:id', async (req, res, next) => {
     await owned(prisma.batch, req.params.id, instituteId);
     const students = await prisma.student.count({ where: { currentBatchId: req.params.id, instituteId } });
     if (students) throw new AppError('Cannot delete: students are enrolled in this class', 400);
+    const sections = await prisma.section.findMany({ where: { batchId: req.params.id, instituteId }, select: { id: true } });
+    const sectionIds = sections.map((s) => s.id);
+    if (sectionIds.length) {
+      await prisma.teacherAssignment.deleteMany({ where: { sectionId: { in: sectionIds }, instituteId } });
+      await prisma.exam.updateMany({ where: { sectionId: { in: sectionIds }, instituteId }, data: { sectionId: null } });
+    }
     await prisma.section.deleteMany({ where: { batchId: req.params.id, instituteId } });
     await prisma.batch.delete({ where: { id: req.params.id } });
     return success(res, null, 'Batch/Class deleted');
@@ -371,6 +379,7 @@ router.delete('/sections/:id', async (req, res, next) => {
     const students = await prisma.student.count({ where: { currentSectionId: req.params.id, instituteId } });
     if (students) throw new AppError('Cannot delete: students are enrolled in this section', 400);
     await prisma.teacherAssignment.deleteMany({ where: { sectionId: req.params.id, instituteId } });
+    await prisma.exam.updateMany({ where: { sectionId: req.params.id, instituteId }, data: { sectionId: null } });
     await prisma.section.delete({ where: { id: req.params.id } });
     return success(res, null, 'Section deleted');
   } catch (err) { next(err); }
