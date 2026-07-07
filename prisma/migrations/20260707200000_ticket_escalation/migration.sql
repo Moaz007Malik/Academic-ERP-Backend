@@ -1,0 +1,13 @@
+ALTER TYPE "TicketCategory" ADD VALUE IF NOT EXISTS 'ACADEMIC';
+ALTER TYPE "TicketCategory" ADD VALUE IF NOT EXISTS 'FEE_FINANCE';
+ALTER TYPE "TicketCategory" ADD VALUE IF NOT EXISTS 'ATTENDANCE';
+ALTER TYPE "TicketCategory" ADD VALUE IF NOT EXISTS 'TECHNICAL';
+
+ALTER TABLE "SupportTicket" ADD COLUMN IF NOT EXISTS "escalatedToSuperAdmin" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "SupportTicket" ADD COLUMN IF NOT EXISTS "escalatedAt" TIMESTAMP(3);
+ALTER TABLE "SupportTicket" ADD COLUMN IF NOT EXISTS "escalatedById" TEXT;
+
+CREATE INDEX IF NOT EXISTS "SupportTicket_escalatedToSuperAdmin_idx" ON "SupportTicket"("escalatedToSuperAdmin");
+
+ALTER TABLE "SupportTicket" ADD CONSTRAINT "SupportTicket_escalatedById_fkey"
+  FOREIGN KEY ("escalatedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;

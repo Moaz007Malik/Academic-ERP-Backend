@@ -39,6 +39,7 @@ import studentPortalRoutes from './modules/student/portal/portal.routes.js';
 import adminDocumentsRoutes from './modules/admin/documents/documents.routes.js';
 import adminCredentialsRoutes from './modules/admin/credentials/credentials.routes.js';
 import individualCoursesRoutes from './modules/admin/individualCourses/individualCourses.routes.js';
+import degreesRoutes from './modules/admin/degrees/degrees.routes.js';
 import studentDocumentsRoutes from './modules/student/documents/documents.routes.js';
 import teacherDocumentsRoutes from './modules/teacher/documents/documents.routes.js';
 
@@ -113,6 +114,7 @@ api.use('/admin/fees', requireRole('INSTITUTE_ADMIN', 'ACCOUNTANT'), adminFeesRo
 api.use('/admin/settings', requireRole('INSTITUTE_ADMIN'), adminSettingsRoutes);
 api.use('/admin/credentials', requireRole('INSTITUTE_ADMIN'), adminCredentialsRoutes);
 api.use('/admin/individual-courses', requireRole('INSTITUTE_ADMIN', 'RECEPTIONIST'), individualCoursesRoutes);
+api.use('/admin/degrees', requireRole('INSTITUTE_ADMIN', 'RECEPTIONIST'), degreesRoutes);
 api.use('/admin/idcard', requireRole('INSTITUTE_ADMIN', 'RECEPTIONIST'), adminIdCardRoutes);
 
 api.use('/admin/workflows', requireRole('INSTITUTE_ADMIN', 'HR', 'ACCOUNTANT', 'RECEPTIONIST'), enterpriseWorkflowsRoutes);

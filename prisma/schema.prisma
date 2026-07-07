@@ -108,6 +108,10 @@ enum TicketCategory {
   FEATURE_REQUEST
   CARD_DESIGN
   SUBSCRIPTION
+  ACADEMIC
+  FEE_FINANCE
+  ATTENDANCE
+  TECHNICAL
   OTHER
 }
 
@@ -225,6 +229,14 @@ model Institute {
   auditLogs          AuditLog[]
   subscriptionInvoices SubscriptionInvoice[]
   individualCourses    IndividualCourse[]
+  individualCourseAttendance IndividualCourseAttendance[]
+  degrees              Degree[]
+  degreeBatches        DegreeBatch[]
+  degreeSemesters      DegreeSemester[]
+  degreeSemesterCourses DegreeSemesterCourse[]
+  degreeStudents       DegreeStudent[]
+  degreeAttendance     DegreeAttendance[]
+  degreeResults        DegreeResult[]
   teacherAssignments TeacherAssignment[]
   personDocuments    PersonDocument[]
   feeRequests        FeeRequest[]
@@ -301,9 +313,12 @@ model User {
   teacher        Teacher?
   loginHistory   LoginHistory[]
   ticketsCreated SupportTicket[] @relation("TicketCreator")
+  ticketsEscalated SupportTicket[] @relation("TicketEscalator")
   ticketReplies  TicketReply[]
   auditLogs      AuditLog[]
   attendanceMarked Attendance[] @relation("MarkedBy")
+  icAttendanceMarked IndividualCourseAttendance[] @relation("ICMarkedBy")
+  degreeAttendanceMarked DegreeAttendance[] @relation("DegreeMarkedBy")
   feesCollected  Fee[]         @relation("CollectedBy")
   feeRequestsReviewed FeeRequest[] @relation("FeeRequestReviewer")
   invoicesCreated SubscriptionInvoice[] @relation("InvoiceCreator")
@@ -509,6 +524,9 @@ model Student {
   promotions          StudentPromotion[]
   studentNotes        StudentNote[]
   courseEnrollments   IndividualCourseEnrollment[]
+  individualCourseAttendance IndividualCourseAttendance[]
+  degreeStudents      DegreeStudent[]
+  degreeAttendance    DegreeAttendance[]
 
   @@unique([instituteId, rollNumber])
   @@index([instituteId, deletedAt])
@@ -550,6 +568,7 @@ model Teacher {
   assignments   TeacherAssignment[]
   documents     PersonDocument[]
   individualCourses IndividualCourseTeacher[]
+  degreeCourseTeachers DegreeCourseTeacher[]
 
   @@index([instituteId])
 }
@@ -618,6 +637,7 @@ model IndividualCourse {
 
   teachers    IndividualCourseTeacher[]
   enrollments IndividualCourseEnrollment[]
+  attendance  IndividualCourseAttendance[]
 
   @@unique([instituteId, code])
   @@index([instituteId, status])
@@ -646,9 +666,215 @@ model IndividualCourseEnrollment {
   feePaid     Decimal                @default(0) @db.Decimal(10, 2)
   feeDue      Decimal                @default(0) @db.Decimal(10, 2)
   notes       String?
+  fees        Fee[]
 
   @@unique([courseId, studentId])
   @@index([instituteId])
+}
+
+model IndividualCourseAttendance {
+  id            String           @id @default(uuid())
+  instituteId   String
+  institute     Institute        @relation(fields: [instituteId], references: [id])
+  courseId      String
+  course        IndividualCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  studentId     String
+  student       Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date          DateTime         @db.Date
+  lectureNumber Int              @default(1)
+  status        AttendanceStatus
+  markedById    String?
+  markedBy      User?            @relation("ICMarkedBy", fields: [markedById], references: [id])
+  createdAt     DateTime         @default(now())
+
+  @@unique([instituteId, courseId, studentId, date, lectureNumber])
+  @@index([instituteId, courseId, date])
+}
+
+// ─── Degree Programs (independent from classes) ──────────────────────────────
+
+enum DegreeProgramStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum DegreeBatchStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum DegreeStudentStatus {
+  ACTIVE
+  INACTIVE
+  DROPOUT
+  SUSPENDED
+  GRADUATED
+  COMPLETED
+  LEFT
+  EXPELLED
+}
+
+model Degree {
+  id          String              @id @default(uuid())
+  instituteId String
+  institute   Institute           @relation(fields: [instituteId], references: [id])
+  name        String              @db.VarChar(200)
+  code        String              @db.VarChar(50)
+  description String?
+  status      DegreeProgramStatus @default(ACTIVE)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  batches DegreeBatch[]
+
+  @@unique([instituteId, code])
+  @@index([instituteId, status])
+}
+
+model DegreeBatch {
+  id               String            @id @default(uuid())
+  instituteId      String
+  institute        Institute         @relation(fields: [instituteId], references: [id])
+  degreeId         String
+  degree           Degree            @relation(fields: [degreeId], references: [id], onDelete: Cascade)
+  name             String            @db.VarChar(100)
+  maxStudents      Int               @default(50)
+  totalSemesters   Int               @default(8)
+  registrationFee  Decimal           @default(0) @db.Decimal(10, 2)
+  currentSemester  Int               @default(1)
+  status           DegreeBatchStatus @default(ACTIVE)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  semesters DegreeSemester[]
+  students  DegreeStudent[]
+
+  @@index([instituteId, degreeId])
+}
+
+model DegreeSemester {
+  id          String      @id @default(uuid())
+  instituteId String
+  institute   Institute   @relation(fields: [instituteId], references: [id])
+  batchId     String
+  batch       DegreeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  number      Int
+  name        String      @db.VarChar(100)
+  semesterFee Decimal     @default(0) @db.Decimal(10, 2)
+  startDate   DateTime?   @db.Date
+  endDate     DateTime?   @db.Date
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  courses DegreeSemesterCourse[]
+  results DegreeResult[]
+
+  @@unique([batchId, number])
+  @@index([instituteId])
+}
+
+model DegreeSemesterCourse {
+  id          String         @id @default(uuid())
+  instituteId String
+  institute   Institute      @relation(fields: [instituteId], references: [id])
+  semesterId  String
+  semester    DegreeSemester @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  name        String         @db.VarChar(200)
+  code        String         @db.VarChar(50)
+  creditHours Int            @default(3)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  teachers   DegreeCourseTeacher[]
+  attendance DegreeAttendance[]
+  results    DegreeResult[]
+
+  @@unique([semesterId, code])
+  @@index([instituteId])
+}
+
+model DegreeCourseTeacher {
+  id        String               @id @default(uuid())
+  courseId  String
+  course    DegreeSemesterCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  teacherId String
+  teacher   Teacher              @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  createdAt DateTime             @default(now())
+
+  @@unique([courseId, teacherId])
+}
+
+model DegreeStudent {
+  id                    String              @id @default(uuid())
+  instituteId           String
+  institute             Institute           @relation(fields: [instituteId], references: [id])
+  batchId               String
+  batch                 DegreeBatch         @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  studentId             String
+  student               Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  currentSemesterNumber Int                 @default(1)
+  registrationFee       Decimal             @default(0) @db.Decimal(10, 2)
+  semesterFee           Decimal             @default(0) @db.Decimal(10, 2)
+  discount              Decimal             @default(0) @db.Decimal(10, 2)
+  netSemesterFee        Decimal             @default(0) @db.Decimal(10, 2)
+  status                DegreeStudentStatus @default(ACTIVE)
+  admittedAt            DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  fees       Fee[]
+  attendance DegreeAttendance[]
+  results    DegreeResult[]
+
+  @@unique([batchId, studentId])
+  @@index([instituteId, status])
+}
+
+model DegreeAttendance {
+  id              String               @id @default(uuid())
+  instituteId     String
+  institute       Institute            @relation(fields: [instituteId], references: [id])
+  courseId        String
+  course          DegreeSemesterCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  degreeStudentId String
+  degreeStudent   DegreeStudent        @relation(fields: [degreeStudentId], references: [id], onDelete: Cascade)
+  studentId       String
+  student         Student              @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date            DateTime             @db.Date
+  lectureNumber   Int                  @default(1)
+  status          AttendanceStatus
+  markedById      String?
+  markedBy        User?                @relation("DegreeMarkedBy", fields: [markedById], references: [id])
+  createdAt       DateTime             @default(now())
+
+  @@unique([instituteId, courseId, studentId, date, lectureNumber])
+  @@index([instituteId, courseId, date])
+}
+
+model DegreeResult {
+  id              String               @id @default(uuid())
+  instituteId     String
+  institute       Institute            @relation(fields: [instituteId], references: [id])
+  degreeStudentId String
+  degreeStudent   DegreeStudent        @relation(fields: [degreeStudentId], references: [id], onDelete: Cascade)
+  semesterId      String
+  semester        DegreeSemester       @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  courseId        String
+  course          DegreeSemesterCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  theoryMarks     Decimal?             @db.Decimal(6, 2)
+  practicalMarks  Decimal?             @db.Decimal(6, 2)
+  internalMarks   Decimal?             @db.Decimal(6, 2)
+  totalMarks      Decimal?             @db.Decimal(6, 2)
+  maxMarks        Decimal?             @db.Decimal(6, 2)
+  grade           String?              @db.VarChar(5)
+  gradePoints     Decimal?             @db.Decimal(3, 2)
+  isPassed        Boolean?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@unique([degreeStudentId, courseId, semesterId])
+  @@index([instituteId, semesterId])
 }
 
 model PersonDocument {
@@ -856,6 +1082,10 @@ model Fee {
   installments   Fee[]        @relation("FeeInstallments")
   installmentNo  Int?
   notes          String?
+  individualCourseEnrollmentId String?
+  individualCourseEnrollment   IndividualCourseEnrollment? @relation(fields: [individualCourseEnrollmentId], references: [id], onDelete: SetNull)
+  degreeStudentId              String?
+  degreeStudent                DegreeStudent? @relation(fields: [degreeStudentId], references: [id], onDelete: SetNull)
   createdAt      DateTime     @default(now())
 
   feeRequests    FeeRequest[]
@@ -863,6 +1093,8 @@ model Fee {
   @@index([instituteId, studentId])
   @@index([instituteId, status])
   @@index([parentFeeId])
+  @@index([individualCourseEnrollmentId])
+  @@index([degreeStudentId])
 }
 
 model FeeRequest {
@@ -929,6 +1161,10 @@ model SupportTicket {
   description String
   status      TicketStatus   @default(OPEN)
   priority    TicketPriority @default(MEDIUM)
+  escalatedToSuperAdmin Boolean @default(false)
+  escalatedAt DateTime?
+  escalatedById String?
+  escalatedBy   User?          @relation("TicketEscalator", fields: [escalatedById], references: [id])
   closedAt    DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
@@ -937,6 +1173,7 @@ model SupportTicket {
 
   @@index([instituteId])
   @@index([status])
+  @@index([escalatedToSuperAdmin])
 }
 
 model TicketReply {

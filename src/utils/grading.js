@@ -62,3 +62,18 @@ export function calculateCGPA(results) {
   }
   return { cgpa: count ? Math.round((totalPoints / count) * 100) / 100 : 0, subjectsCount: count };
 }
+
+/** Credit-weighted semester GPA for degree programs */
+export function calculateSemesterGPA(results) {
+  if (!results?.length) return 0;
+  let totalPoints = 0;
+  let totalCredits = 0;
+  for (const r of results) {
+    const credits = Number(r.creditHours) || 3;
+    const points = Number(r.gradePoints) || 0;
+    if (r.isPassed === false) continue;
+    totalPoints += points * credits;
+    totalCredits += credits;
+  }
+  return totalCredits ? Math.round((totalPoints / totalCredits) * 100) / 100 : 0;
+}

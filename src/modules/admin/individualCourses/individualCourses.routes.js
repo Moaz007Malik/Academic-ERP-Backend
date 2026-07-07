@@ -7,6 +7,7 @@ import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { createPortalUser, generateRollNumber } from '../../../utils/portalUser.js';
 import { AppError } from '../../../utils/AppError.js';
+import { assignIndividualCourseFees, calculateEnrollmentFeeDue } from '../../../services/individualCourseFee.service.js';
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.INDIVIDUAL_COURSES));
@@ -144,10 +145,14 @@ router.post('/:id/enroll', async (req, res, next) => {
 
     const { studentId, newStudent, notes } = req.body;
     const instituteId = req.user.instituteId;
-    const totalFee = Number(course.admissionFee) + Number(course.oneTimeFee) + Number(course.monthlyFee)
-      - Number(course.discountAmount) - Number(course.scholarshipAmount);
+    const totalFee = calculateEnrollmentFeeDue(course);
 
-    const enrollment = await prisma.$transaction(async (tx) => {
+    const enrollmentCount = await prisma.individualCourseEnrollment.count({
+      where: { courseId: course.id, status: { not: 'DROPPED' } },
+    });
+    if (enrollmentCount >= course.capacity) throw new AppError('Course capacity is full', 400);
+
+    const result = await prisma.$transaction(async (tx) => {
       let sid = studentId;
       if (!sid && newStudent) {
         const { firstName, lastName, email, password, phone } = newStudent;
@@ -167,6 +172,10 @@ router.post('/:id/enroll', async (req, res, next) => {
             instituteId, userId, firstName, lastName, phone: phone || null,
             rollNumber: generateRollNumber(prefix, count + 1),
             enrollmentDate: new Date(), status: 'ACTIVE',
+            ...(newStudent.dateOfBirth && { dateOfBirth: new Date(newStudent.dateOfBirth) }),
+            ...(newStudent.gender && { gender: newStudent.gender }),
+            ...(newStudent.guardianName && { guardianName: newStudent.guardianName }),
+            ...(newStudent.guardianPhone && { guardianPhone: newStudent.guardianPhone }),
           },
         });
         sid = st.id;
@@ -178,15 +187,112 @@ router.post('/:id/enroll', async (req, res, next) => {
       });
       if (dup) throw new AppError('Student already enrolled', 409);
 
-      return tx.individualCourseEnrollment.create({
+      const enrollment = await tx.individualCourseEnrollment.create({
         data: {
           instituteId, courseId: course.id, studentId: sid,
           feeDue: totalFee, notes: notes || null,
         },
         include: { student: true },
       });
+
+      const fees = await assignIndividualCourseFees(tx, {
+        instituteId, course, enrollment, studentId: sid,
+      });
+
+      return { enrollment, feesAssigned: fees.length };
     });
-    return success(res, enrollment, 'Enrolled', 201);
+    return success(res, result, 'Enrolled with fees assigned', 201);
+  } catch (err) { next(err); }
+});
+
+router.post('/:id/teachers', async (req, res, next) => {
+  try {
+    const { teacherId } = req.body;
+    if (!teacherId) throw new AppError('teacherId required', 400);
+    const course = await prisma.individualCourse.findFirst({
+      where: { id: req.params.id, instituteId: req.user.instituteId },
+    });
+    if (!course) throw new AppError('Course not found', 404);
+    const link = await prisma.individualCourseTeacher.upsert({
+      where: { courseId_teacherId: { courseId: course.id, teacherId } },
+      create: { courseId: course.id, teacherId },
+      update: {},
+      include: { teacher: { select: { id: true, firstName: true, lastName: true } } },
+    });
+    return success(res, link, 'Teacher assigned', 201);
+  } catch (err) { next(err); }
+});
+
+router.delete('/:id/teachers/:teacherId', async (req, res, next) => {
+  try {
+    await prisma.individualCourseTeacher.deleteMany({
+      where: { courseId: req.params.id, teacherId: req.params.teacherId },
+    });
+    return success(res, null, 'Teacher removed');
+  } catch (err) { next(err); }
+});
+
+router.get('/:id/attendance', async (req, res, next) => {
+  try {
+    const where = {
+      instituteId: req.user.instituteId,
+      courseId: req.params.id,
+      ...(req.query.date && { date: new Date(req.query.date) }),
+    };
+    const records = await prisma.individualCourseAttendance.findMany({
+      where,
+      include: {
+        student: { select: { id: true, firstName: true, lastName: true, rollNumber: true } },
+      },
+      orderBy: { date: 'desc' },
+    });
+    return success(res, records);
+  } catch (err) { next(err); }
+});
+
+router.post('/:id/attendance/mark', async (req, res, next) => {
+  try {
+    const { date, records } = req.body;
+    if (!date || !Array.isArray(records)) throw new AppError('date and records required', 400);
+
+    const course = await prisma.individualCourse.findFirst({
+      where: { id: req.params.id, instituteId: req.user.instituteId },
+    });
+    if (!course) throw new AppError('Course not found', 404);
+
+    const enrolled = await prisma.individualCourseEnrollment.findMany({
+      where: { courseId: course.id, status: 'ENROLLED' },
+      select: { studentId: true },
+    });
+    const allowed = new Set(enrolled.map((e) => e.studentId));
+    const saved = [];
+
+    for (const rec of records) {
+      if (!allowed.has(rec.studentId)) continue;
+      const row = await prisma.individualCourseAttendance.upsert({
+        where: {
+          instituteId_courseId_studentId_date_lectureNumber: {
+            instituteId: req.user.instituteId,
+            courseId: course.id,
+            studentId: rec.studentId,
+            date: new Date(date),
+            lectureNumber: rec.lectureNumber || 1,
+          },
+        },
+        create: {
+          instituteId: req.user.instituteId,
+          courseId: course.id,
+          studentId: rec.studentId,
+          date: new Date(date),
+          lectureNumber: rec.lectureNumber || 1,
+          status: rec.status || 'PRESENT',
+          markedById: req.user.id,
+        },
+        update: { status: rec.status || 'PRESENT', markedById: req.user.id },
+      });
+      saved.push(row);
+    }
+    return success(res, saved, `Attendance marked for ${saved.length} students`);
   } catch (err) { next(err); }
 });
 

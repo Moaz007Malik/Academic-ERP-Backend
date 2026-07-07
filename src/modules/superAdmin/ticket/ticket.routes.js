@@ -9,7 +9,7 @@ const router = Router();
 router.get('/', async (req, res, next) => {
   try {
     const { page, limit, skip } = parsePagination(req.query);
-    const where = {};
+    const where = { escalatedToSuperAdmin: true };
     if (req.query.status) where.status = req.query.status;
 
     const [tickets, total] = await Promise.all([

@@ -24,14 +24,13 @@ async function assertUnique(model, where, message) {
 router.get('/structure', async (req, res, next) => {
   try {
     const instituteId = req.user.instituteId;
-    const [sessions, semesters, departments, batches, sections] = await Promise.all([
+    const [sessions, departments, batches, sections] = await Promise.all([
       prisma.session.findMany({ where: { instituteId }, orderBy: { startDate: 'desc' } }),
-      prisma.semester.findMany({ where: { instituteId }, include: { session: true }, orderBy: { number: 'asc' } }),
       prisma.department.findMany({ where: { instituteId }, include: { courses: { include: { subjects: true } } } }),
       prisma.batch.findMany({ where: { instituteId }, include: { session: true } }),
       prisma.section.findMany({ where: { instituteId }, include: { batch: true } }),
     ]);
-    return success(res, { sessions, semesters, departments, batches, sections });
+    return success(res, { sessions, departments, batches, sections });
   } catch (err) {
     next(err);
   }

@@ -178,9 +178,10 @@ router.post('/tickets', async (req, res, next) => {
         category: category || 'OTHER',
         description,
         priority: priority || 'MEDIUM',
+        escalatedToSuperAdmin: false,
       },
     });
-    return success(res, ticket, 'Ticket created', 201);
+    return success(res, ticket, 'Ticket submitted to your institute', 201);
   } catch (err) { next(err); }
 });
 

@@ -32,6 +32,7 @@ export const MODULE_CATALOG = [
   { key: MODULE_KEYS.RESEARCH, label: 'Research', category: 'Academic', description: 'Research projects' },
   { key: MODULE_KEYS.PROFILE_SETTINGS, label: 'Profile Settings', category: 'System', description: 'Institute profile and preferences' },
   { key: MODULE_KEYS.INDIVIDUAL_COURSES, label: 'Individual Courses', category: 'Academic', description: 'Short courses independent of class/batch system' },
+  { key: MODULE_KEYS.DEGREE, label: 'Degree Programs', category: 'Academic', description: 'University degree batches, semesters, GPA and transcripts' },
 ];
 
 export const ALL_MODULE_KEYS = MODULE_CATALOG.map((m) => m.key);
