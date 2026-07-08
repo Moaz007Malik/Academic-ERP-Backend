@@ -27,6 +27,7 @@ import adminExamsRoutes from './modules/admin/exams/exams.routes.js';
 import adminResultsRoutes from './modules/admin/results/results.routes.js';
 import adminAttendanceRoutes from './modules/admin/attendance/attendance.routes.js';
 import adminFeesRoutes from './modules/admin/fees/fees.routes.js';
+import financeHubRoutes from './modules/admin/fees/financeHub.routes.js';
 import adminSettingsRoutes from './modules/admin/settings/settings.routes.js';
 import adminIdCardRoutes from './modules/admin/idcard/idcard.routes.js';
 import saModulesRoutes from './modules/superAdmin/modules/modules.routes.js';
@@ -111,6 +112,7 @@ api.use('/admin/exams', requireRole('INSTITUTE_ADMIN', 'TEACHER'), adminExamsRou
 api.use('/admin/results', requireRole('INSTITUTE_ADMIN', 'TEACHER'), adminResultsRoutes);
 api.use('/admin/attendance', requireRole('INSTITUTE_ADMIN', 'TEACHER', 'RECEPTIONIST'), adminAttendanceRoutes);
 api.use('/admin/fees', requireRole('INSTITUTE_ADMIN', 'ACCOUNTANT'), adminFeesRoutes);
+api.use('/admin/finance', requireRole('INSTITUTE_ADMIN', 'ACCOUNTANT'), financeHubRoutes);
 api.use('/admin/settings', requireRole('INSTITUTE_ADMIN'), adminSettingsRoutes);
 api.use('/admin/credentials', requireRole('INSTITUTE_ADMIN'), adminCredentialsRoutes);
 api.use('/admin/individual-courses', requireRole('INSTITUTE_ADMIN', 'RECEPTIONIST'), individualCoursesRoutes);

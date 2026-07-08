@@ -7,7 +7,11 @@ import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { AppError } from '../../../utils/AppError.js';
 import { createPortalUser, generateRollNumber } from '../../../utils/portalUser.js';
-import { assignDegreeStudentFees, calcNetSemesterFee, createSemesterInstallments } from '../../../services/degreeFee.service.js';
+import {
+  assignDegreeStudentFees, calcNetSemesterFee, createSemesterInstallments,
+  getEffectiveSemesterFee, assignFeesOnBatchPromote,
+} from '../../../services/degreeFee.service.js';
+import { getDegreeStudentProfile } from '../../../services/degreeProfile.service.js';
 import { computeResult, calculateCGPA, calculateSemesterGPA } from '../../../utils/grading.js';
 
 const router = Router();
@@ -72,7 +76,14 @@ router.get('/batches/:batchId', async (req, res, next) => {
       },
     });
     if (!batch) throw new AppError('Batch not found', 404);
-    return success(res, batch);
+    const enriched = {
+      ...batch,
+      semesters: batch.semesters.map((s) => ({
+        ...s,
+        effectiveFee: getEffectiveSemesterFee(batch, s),
+      })),
+    };
+    return success(res, enriched);
   } catch (err) { next(err); }
 });
 
@@ -135,9 +146,10 @@ router.post('/:degreeId/batches', async (req, res, next) => {
     });
     if (!degree) throw new AppError('Degree not found', 404);
 
-    const { name, maxStudents, totalSemesters, registrationFee } = req.body;
+    const { name, maxStudents, totalSemesters, registrationFee, defaultSemesterFee } = req.body;
     if (!name) throw new AppError('Batch name required', 400);
     const semestersCount = Number(totalSemesters) || 8;
+    const defaultFee = defaultSemesterFee ?? 0;
 
     const batch = await prisma.$transaction(async (tx) => {
       const b = await tx.degreeBatch.create({
@@ -148,6 +160,7 @@ router.post('/:degreeId/batches', async (req, res, next) => {
           maxStudents: maxStudents || 50,
           totalSemesters: semestersCount,
           registrationFee: registrationFee ?? 0,
+          defaultSemesterFee: defaultFee,
         },
       });
       const semesterRows = Array.from({ length: semestersCount }, (_, i) => ({
@@ -155,7 +168,7 @@ router.post('/:degreeId/batches', async (req, res, next) => {
         batchId: b.id,
         number: i + 1,
         name: `Semester ${i + 1}`,
-        semesterFee: 0,
+        semesterFee: null,
       }));
       await tx.degreeSemester.createMany({ data: semesterRows });
       return b;
@@ -171,13 +184,14 @@ router.put('/batches/:batchId', async (req, res, next) => {
       where: { id: req.params.batchId, instituteId: req.user.instituteId },
     });
     if (!batch) throw new AppError('Batch not found', 404);
-    const { name, maxStudents, registrationFee, status } = req.body;
+    const { name, maxStudents, registrationFee, defaultSemesterFee, status } = req.body;
     const updated = await prisma.degreeBatch.update({
       where: { id: batch.id },
       data: {
         ...(name !== undefined && { name }),
         ...(maxStudents !== undefined && { maxStudents }),
         ...(registrationFee !== undefined && { registrationFee }),
+        ...(defaultSemesterFee !== undefined && { defaultSemesterFee }),
         ...(status !== undefined && { status }),
       },
     });
@@ -220,15 +234,24 @@ router.post('/batches/:batchId/promote', async (req, res, next) => {
     const nextSem = batch.currentSemester + 1;
 
     const result = await prisma.$transaction(async (tx) => {
-      await tx.degreeBatch.update({
+      const updatedBatch = await tx.degreeBatch.update({
         where: { id: batch.id },
         data: { currentSemester: nextSem },
       });
-      const updated = await tx.degreeStudent.updateMany({
+      await tx.degreeStudent.updateMany({
         where: { batchId: batch.id, instituteId, status: 'ACTIVE' },
         data: { currentSemesterNumber: nextSem },
       });
-      return { promotedStudents: updated.count, currentSemester: nextSem };
+      const semester = await tx.degreeSemester.findFirst({
+        where: { batchId: batch.id, number: nextSem },
+      });
+      const feesAssigned = await assignFeesOnBatchPromote(tx, {
+        instituteId, batch: updatedBatch, semester,
+      });
+      const count = await tx.degreeStudent.count({
+        where: { batchId: batch.id, instituteId, status: 'ACTIVE' },
+      });
+      return { promotedStudents: count, currentSemester: nextSem, feesAssigned };
     });
     return success(res, result, `Batch promoted to semester ${nextSem}`);
   } catch (err) { next(err); }
@@ -240,19 +263,27 @@ router.put('/semesters/:semesterId', async (req, res, next) => {
   try {
     const semester = await prisma.degreeSemester.findFirst({
       where: { id: req.params.semesterId, instituteId: req.user.instituteId },
+      include: { batch: true },
     });
     if (!semester) throw new AppError('Semester not found', 404);
-    const { name, semesterFee, startDate, endDate } = req.body;
+    const { name, semesterFee, useDefaultFee, startDate, endDate } = req.body;
+
+    let feeValue = semester.semesterFee;
+    if (useDefaultFee === true) feeValue = null;
+    else if (semesterFee !== undefined) feeValue = semesterFee === null || semesterFee === '' ? null : semesterFee;
+
     const updated = await prisma.degreeSemester.update({
       where: { id: semester.id },
       data: {
         ...(name !== undefined && { name }),
-        ...(semesterFee !== undefined && { semesterFee }),
+        ...(feeValue !== undefined && { semesterFee: feeValue }),
         ...(startDate !== undefined && { startDate: startDate ? new Date(startDate) : null }),
         ...(endDate !== undefined && { endDate: endDate ? new Date(endDate) : null }),
       },
+      include: { batch: true },
     });
-    return success(res, updated, 'Semester updated');
+    const effectiveFee = getEffectiveSemesterFee(updated.batch, updated);
+    return success(res, { ...updated, effectiveFee }, 'Semester updated');
   } catch (err) { next(err); }
 });
 
@@ -327,7 +358,7 @@ router.delete('/courses/:courseId', async (req, res, next) => {
 async function admitDegreeStudent(tx, instituteId, batch, payload) {
   const {
     studentId, newStudent,
-    registrationFee, semesterFee, discount, installmentCount,
+    discount, scholarship, installmentEnabled, installmentCount,
   } = payload;
 
   const activeCount = await tx.degreeStudent.count({
@@ -336,22 +367,23 @@ async function admitDegreeStudent(tx, instituteId, batch, payload) {
   if (activeCount >= batch.maxStudents) throw new AppError('Batch capacity full', 400);
 
   let sid = studentId;
+  let portalCreds = null;
   if (!sid && newStudent) {
     const { firstName, lastName, email, password, phone } = newStudent;
     if (!firstName || !lastName) throw new AppError('Student name required', 400);
+    if (!email?.trim()) throw new AppError('Email required for student portal access', 400);
     const count = await tx.student.count({ where: { instituteId } });
     const institute = await tx.institute.findUnique({ where: { id: instituteId } });
     const prefix = institute?.instituteCode?.slice(0, 3) || 'STU';
-    let userId = null;
-    if (email) {
-      const user = await createPortalUser(tx, {
-        email, password, role: 'STUDENT', instituteId, firstName, lastName,
-      });
-      userId = user.id;
-    }
+    const existing = await tx.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (existing) throw new AppError('Email already in use', 409);
+    const plainPassword = password || 'Student@123';
+    const user = await createPortalUser(tx, {
+      email, password: plainPassword, role: 'STUDENT', instituteId, firstName, lastName,
+    });
     const st = await tx.student.create({
       data: {
-        instituteId, userId, firstName, lastName, phone: phone || null,
+        instituteId, userId: user.id, firstName, lastName, phone: phone || null,
         rollNumber: generateRollNumber(prefix, count + 1),
         enrollmentDate: new Date(), status: 'ACTIVE',
         dateOfBirth: newStudent.dateOfBirth ? new Date(newStudent.dateOfBirth) : null,
@@ -365,6 +397,7 @@ async function admitDegreeStudent(tx, instituteId, batch, payload) {
       },
     });
     sid = st.id;
+    portalCreds = { email: user.email, password: plainPassword };
   }
   if (!sid) throw new AppError('Student or new student data required', 400);
 
@@ -376,10 +409,13 @@ async function admitDegreeStudent(tx, instituteId, batch, payload) {
   const semester = await tx.degreeSemester.findFirst({
     where: { batchId: batch.id, number: batch.currentSemester },
   });
-  const semFee = semesterFee ?? semester?.semesterFee ?? 0;
-  const regFee = registrationFee ?? batch.registrationFee ?? 0;
+  const semFee = getEffectiveSemesterFee(batch, semester);
+  const regFee = batch.registrationFee ?? 0;
   const disc = discount ?? 0;
-  const netFee = calcNetSemesterFee(semFee, disc);
+  const schol = scholarship ?? 0;
+  const netFee = calcNetSemesterFee(semFee, disc, schol);
+  const instEnabled = installmentEnabled === true || installmentEnabled === 'true';
+  const instCount = instEnabled ? Math.min(Math.max(Number(installmentCount) || 1, 1), 6) : null;
 
   const degreeStudent = await tx.degreeStudent.create({
     data: {
@@ -390,28 +426,31 @@ async function admitDegreeStudent(tx, instituteId, batch, payload) {
       registrationFee: regFee,
       semesterFee: semFee,
       discount: disc,
+      scholarship: schol,
       netSemesterFee: netFee,
+      installmentEnabled: instEnabled,
+      installmentCount: instCount,
     },
-    include: { student: true },
+    include: { student: { include: { user: { select: { email: true, portalPassword: true } } } } },
   });
 
   const fees = await assignDegreeStudentFees(tx, {
-    instituteId, degreeStudent, batch, semester,
+    instituteId, degreeStudent, batch, semester, semesterNumber: batch.currentSemester,
   });
 
-  if (installmentCount && installmentCount > 1 && fees.length) {
+  if (instEnabled && instCount > 1 && fees.length) {
     const semFeeRecord = fees.find((f) => (f.notes || '').includes('Semester'));
     if (semFeeRecord) {
       await createSemesterInstallments(tx, {
         instituteId,
         parentFee: semFeeRecord,
-        installmentCount,
+        installmentCount: instCount,
         firstDueDate: semester?.startDate,
       });
     }
   }
 
-  return { degreeStudent, feesAssigned: fees.length };
+  return { degreeStudent, feesAssigned: fees.length, portalCredentials: portalCreds };
 }
 
 router.post('/batches/:batchId/students', async (req, res, next) => {
@@ -452,25 +491,125 @@ router.put('/students/:degreeStudentId', async (req, res, next) => {
   try {
     const ds = await prisma.degreeStudent.findFirst({
       where: { id: req.params.degreeStudentId, instituteId: req.user.instituteId },
+      include: { batch: true },
     });
     if (!ds) throw new AppError('Degree student not found', 404);
-    const { status, semesterFee, discount, currentSemesterNumber } = req.body;
-    const semFee = semesterFee !== undefined ? semesterFee : ds.semesterFee;
+    const {
+      status, discount, scholarship, currentSemesterNumber,
+      installmentEnabled, installmentCount,
+    } = req.body;
     const disc = discount !== undefined ? discount : ds.discount;
+    const schol = scholarship !== undefined ? scholarship : ds.scholarship;
     const updated = await prisma.degreeStudent.update({
       where: { id: ds.id },
       data: {
         ...(status !== undefined && { status }),
         ...(currentSemesterNumber !== undefined && { currentSemesterNumber }),
-        ...(semesterFee !== undefined && { semesterFee: semFee }),
         ...(discount !== undefined && { discount: disc }),
-        ...((semesterFee !== undefined || discount !== undefined) && {
-          netSemesterFee: calcNetSemesterFee(semFee, disc),
+        ...(scholarship !== undefined && { scholarship: schol }),
+        ...((discount !== undefined || scholarship !== undefined) && {
+          netSemesterFee: calcNetSemesterFee(ds.semesterFee, disc, schol),
         }),
+        ...(installmentEnabled !== undefined && { installmentEnabled: !!installmentEnabled }),
+        ...(installmentCount !== undefined && { installmentCount: installmentCount || null }),
       },
-      include: { student: true },
+      include: { student: true, batch: { include: { degree: true } } },
     });
     return success(res, updated, 'Student updated');
+  } catch (err) { next(err); }
+});
+
+router.get('/students/:degreeStudentId/profile', async (req, res, next) => {
+  try {
+    const profile = await getDegreeStudentProfile(req.params.degreeStudentId, req.user.instituteId);
+    if (!profile) throw new AppError('Degree student not found', 404);
+    return success(res, profile);
+  } catch (err) { next(err); }
+});
+
+router.get('/students/:degreeStudentId/attendance', async (req, res, next) => {
+  try {
+    const instituteId = req.user.instituteId;
+    const ds = await prisma.degreeStudent.findFirst({
+      where: { id: req.params.degreeStudentId, instituteId },
+      include: { batch: { include: { semesters: true } } },
+    });
+    if (!ds) throw new AppError('Degree student not found', 404);
+
+    const where = { degreeStudentId: ds.id, instituteId };
+    if (req.query.semesterId) {
+      const courseIds = await prisma.degreeSemesterCourse.findMany({
+        where: { semesterId: req.query.semesterId, instituteId },
+        select: { id: true },
+      });
+      where.courseId = { in: courseIds.map((c) => c.id) };
+    } else if (req.query.semesterNumber) {
+      const sem = ds.batch.semesters.find((s) => s.number === Number(req.query.semesterNumber));
+      if (sem) {
+        const courseIds = await prisma.degreeSemesterCourse.findMany({
+          where: { semesterId: sem.id, instituteId },
+          select: { id: true },
+        });
+        where.courseId = { in: courseIds.map((c) => c.id) };
+      }
+    }
+
+    const records = await prisma.degreeAttendance.findMany({
+      where,
+      include: { course: { include: { semester: true } } },
+      orderBy: { date: 'desc' },
+    });
+    const total = records.length;
+    const present = records.filter((r) => r.status === 'PRESENT' || r.status === 'LATE').length;
+    return success(res, {
+      records,
+      summary: { total, present, percentage: total ? Math.round((present / total) * 10000) / 100 : 0 },
+    });
+  } catch (err) { next(err); }
+});
+
+router.get('/students/:degreeStudentId/results', async (req, res, next) => {
+  try {
+    const instituteId = req.user.instituteId;
+    const ds = await prisma.degreeStudent.findFirst({
+      where: { id: req.params.degreeStudentId, instituteId },
+      include: { batch: { include: { degree: true, semesters: { orderBy: { number: 'asc' } } } }, student: true },
+    });
+    if (!ds) throw new AppError('Degree student not found', 404);
+
+    const where = { degreeStudentId: ds.id, instituteId };
+    if (req.query.semesterId) where.semesterId = req.query.semesterId;
+
+    const results = await prisma.degreeResult.findMany({
+      where,
+      include: { course: true, semester: true },
+      orderBy: [{ semester: { number: 'asc' } }, { course: { name: 'asc' } }],
+    });
+
+    const bySemester = {};
+    for (const r of results) {
+      const key = r.semesterId;
+      if (!bySemester[key]) {
+        bySemester[key] = {
+          semester: r.semester,
+          effectiveFee: getEffectiveSemesterFee(ds.batch, r.semester),
+          results: [],
+          gpa: 0,
+        };
+      }
+      bySemester[key].results.push(r);
+    }
+    Object.values(bySemester).forEach((s) => {
+      s.gpa = calculateSemesterGPA(s.results.map((r) => ({
+        gradePoints: r.gradePoints, creditHours: r.course.creditHours, isPassed: r.isPassed,
+      })));
+    });
+
+    return success(res, {
+      student: ds,
+      semesterResults: Object.values(bySemester).sort((a, b) => a.semester.number - b.semester.number),
+      cgpa: calculateCGPA(results.filter((r) => r.isPassed)),
+    });
   } catch (err) { next(err); }
 });
 
@@ -490,19 +629,45 @@ router.post('/batches/:batchId/students/bulk-status', async (req, res, next) => 
 
 router.get('/courses/:courseId/attendance', async (req, res, next) => {
   try {
+    const instituteId = req.user.instituteId;
+    const course = await prisma.degreeSemesterCourse.findFirst({
+      where: { id: req.params.courseId, instituteId },
+      include: { semester: true },
+    });
+    if (!course) throw new AppError('Course not found', 404);
+
     const where = {
-      instituteId: req.user.instituteId,
+      instituteId,
       courseId: req.params.courseId,
       ...(req.query.date && { date: new Date(req.query.date) }),
     };
+    if (req.query.from || req.query.to) {
+      where.date = {};
+      if (req.query.from) where.date.gte = new Date(req.query.from);
+      if (req.query.to) where.date.lte = new Date(req.query.to);
+    }
+
     const records = await prisma.degreeAttendance.findMany({
       where,
       include: {
         student: { select: { id: true, firstName: true, lastName: true, rollNumber: true } },
+        degreeStudent: { select: { id: true, currentSemesterNumber: true } },
       },
       orderBy: { date: 'desc' },
     });
-    return success(res, records);
+
+    const summary = {
+      total: records.length,
+      present: records.filter((r) => r.status === 'PRESENT').length,
+      absent: records.filter((r) => r.status === 'ABSENT').length,
+      late: records.filter((r) => r.status === 'LATE').length,
+      leave: records.filter((r) => r.status === 'LEAVE').length,
+    };
+    summary.percentage = summary.total
+      ? Math.round(((summary.present + summary.late) / summary.total) * 10000) / 100
+      : 0;
+
+    return success(res, { course, semester: course.semester, records, summary });
   } catch (err) { next(err); }
 });
 
@@ -520,8 +685,8 @@ router.post('/courses/:courseId/attendance/mark', async (req, res, next) => {
     const enrolled = await prisma.degreeStudent.findMany({
       where: {
         batchId: course.semester.batchId,
-        currentSemesterNumber: course.semester.number,
         status: 'ACTIVE',
+        currentSemesterNumber: { gte: course.semester.number },
       },
     });
     const byStudent = new Map(enrolled.map((e) => [e.studentId, e.id]));
@@ -565,8 +730,9 @@ router.post('/results/entry', async (req, res, next) => {
     const instituteId = req.user.instituteId;
     const {
       degreeStudentId, semesterId, courseId,
-      theoryMarks, practicalMarks, internalMarks,
+      theoryMarks, practicalMarks, internalMarks, remarks,
       theoryMax = 75, practicalMax = 15, internalMax = 10, passPercentage = 33,
+      publish,
     } = req.body;
     if (!degreeStudentId || !semesterId || !courseId) {
       throw new AppError('degreeStudentId, semesterId, courseId required', 400);
@@ -592,7 +758,11 @@ router.post('/results/entry', async (req, res, next) => {
         maxMarks: computed.maxMarks,
         grade: computed.grade,
         gradePoints: computed.gradePoints,
+        percentage: computed.percentage,
+        passPercentage,
+        remarks: remarks || null,
         isPassed: computed.isPassed,
+        ...(publish && { publishedAt: new Date() }),
       },
       update: {
         theoryMarks, practicalMarks, internalMarks,
@@ -600,7 +770,11 @@ router.post('/results/entry', async (req, res, next) => {
         maxMarks: computed.maxMarks,
         grade: computed.grade,
         gradePoints: computed.gradePoints,
+        percentage: computed.percentage,
+        passPercentage,
+        remarks: remarks !== undefined ? remarks : undefined,
         isPassed: computed.isPassed,
+        ...(publish && { publishedAt: new Date() }),
       },
       include: { course: true },
     });
@@ -610,7 +784,7 @@ router.post('/results/entry', async (req, res, next) => {
 
 router.post('/results/bulk', async (req, res, next) => {
   try {
-    const { semesterId, courseId, entries = [], theoryMax, practicalMax, internalMax, passPercentage } = req.body;
+    const { semesterId, courseId, entries = [], theoryMax, practicalMax, internalMax, passPercentage, publish } = req.body;
     if (!semesterId || !courseId || !entries.length) {
       throw new AppError('semesterId, courseId and entries required', 400);
     }
@@ -642,7 +816,11 @@ router.post('/results/bulk', async (req, res, next) => {
           maxMarks: computed.maxMarks,
           grade: computed.grade,
           gradePoints: computed.gradePoints,
+          percentage: computed.percentage,
+          passPercentage: passPercentage ?? 33,
+          remarks: e.remarks || null,
           isPassed: computed.isPassed,
+          ...(publish && { publishedAt: new Date() }),
         },
         update: {
           theoryMarks: e.theoryMarks,
@@ -652,7 +830,11 @@ router.post('/results/bulk', async (req, res, next) => {
           maxMarks: computed.maxMarks,
           grade: computed.grade,
           gradePoints: computed.gradePoints,
+          percentage: computed.percentage,
+          passPercentage: passPercentage ?? 33,
+          remarks: e.remarks !== undefined ? e.remarks : undefined,
           isPassed: computed.isPassed,
+          ...(publish && { publishedAt: new Date() }),
         },
       });
       saved.push(row);

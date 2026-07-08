@@ -742,8 +742,9 @@ model DegreeBatch {
   name             String            @db.VarChar(100)
   maxStudents      Int               @default(50)
   totalSemesters   Int               @default(8)
-  registrationFee  Decimal           @default(0) @db.Decimal(10, 2)
-  currentSemester  Int               @default(1)
+  registrationFee     Decimal           @default(0) @db.Decimal(10, 2)
+  defaultSemesterFee  Decimal           @default(0) @db.Decimal(10, 2)
+  currentSemester     Int               @default(1)
   status           DegreeBatchStatus @default(ACTIVE)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -762,7 +763,7 @@ model DegreeSemester {
   batch       DegreeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
   number      Int
   name        String      @db.VarChar(100)
-  semesterFee Decimal     @default(0) @db.Decimal(10, 2)
+  semesterFee Decimal?    @db.Decimal(10, 2)
   startDate   DateTime?   @db.Date
   endDate     DateTime?   @db.Date
   createdAt   DateTime    @default(now())
@@ -818,7 +819,10 @@ model DegreeStudent {
   registrationFee       Decimal             @default(0) @db.Decimal(10, 2)
   semesterFee           Decimal             @default(0) @db.Decimal(10, 2)
   discount              Decimal             @default(0) @db.Decimal(10, 2)
+  scholarship           Decimal             @default(0) @db.Decimal(10, 2)
   netSemesterFee        Decimal             @default(0) @db.Decimal(10, 2)
+  installmentEnabled    Boolean             @default(false)
+  installmentCount      Int?
   status                DegreeStudentStatus @default(ACTIVE)
   admittedAt            DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
@@ -869,7 +873,11 @@ model DegreeResult {
   maxMarks        Decimal?             @db.Decimal(6, 2)
   grade           String?              @db.VarChar(5)
   gradePoints     Decimal?             @db.Decimal(3, 2)
+  percentage      Decimal?             @db.Decimal(6, 2)
+  passPercentage  Decimal?             @db.Decimal(5, 2)
+  remarks         String?
   isPassed        Boolean?
+  publishedAt     DateTime?
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 
