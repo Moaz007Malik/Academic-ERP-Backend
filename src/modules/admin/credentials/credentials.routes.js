@@ -3,7 +3,9 @@ import { prisma } from '../../../config/database.js';
 import { success } from '../../../utils/response.js';
 import { AppError } from '../../../utils/AppError.js';
 import { hashPassword } from '../../auth/auth.service.js';
+import { revokeAllUserTokens } from '../../../services/token.service.js';
 import { generateTempPassword } from '../../../utils/portalUser.js';
+import { savePasswordHistory } from '../../../security/securityPolicies.js';
 
 const router = Router();
 
@@ -50,6 +52,7 @@ router.post('/:userId/reset-password', async (req, res, next) => {
     const newPassword = req.body.password?.trim() || generateTempPassword();
     const passwordHash = await hashPassword(newPassword);
 
+    await savePasswordHistory(user.id, user.passwordHash);
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -58,6 +61,7 @@ router.post('/:userId/reset-password', async (req, res, next) => {
         mustChangePass: true,
       },
     });
+    await revokeAllUserTokens(user.id);
 
     return success(res, {
       email: user.email,
@@ -83,6 +87,7 @@ router.put('/:userId/password', async (req, res, next) => {
     if (!user) throw new AppError('User not found', 404);
 
     const passwordHash = await hashPassword(password.trim());
+    await savePasswordHistory(user.id, user.passwordHash);
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -91,6 +96,7 @@ router.put('/:userId/password', async (req, res, next) => {
         mustChangePass: false,
       },
     });
+    await revokeAllUserTokens(user.id);
 
     return success(res, { email: user.email, password: password.trim() }, 'Password updated');
   } catch (err) { next(err); }

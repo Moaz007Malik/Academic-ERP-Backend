@@ -3,6 +3,8 @@ import { prisma } from '../../../config/database.js';
 import { success, paginated } from '../../../utils/response.js';
 import { parsePagination, buildPaginationMeta } from '../../../utils/pagination.js';
 import { hashPassword } from '../../auth/auth.service.js';
+import { revokeAllUserTokens } from '../../../services/token.service.js';
+import { savePasswordHistory } from '../../../security/securityPolicies.js';
 import { CORE_MODULES } from '../../../utils/constants.js';
 import { MODULE_CATALOG, summarizeModules, ALL_MODULE_KEYS } from '../../../utils/moduleCatalog.js';
 import { generateTempPassword } from '../../../utils/portalUser.js';
@@ -304,6 +306,7 @@ router.post('/:id/reset-admin-password', async (req, res, next) => {
     const newPassword = req.body.password?.trim() || generateTempPassword();
     const passwordHash = await hashPassword(newPassword);
 
+    await savePasswordHistory(admin.id, admin.passwordHash);
     await prisma.user.update({
       where: { id: admin.id },
       data: {
@@ -312,6 +315,7 @@ router.post('/:id/reset-admin-password', async (req, res, next) => {
         mustChangePass: true,
       },
     });
+    await revokeAllUserTokens(admin.id);
 
     return success(res, {
       email: admin.email,

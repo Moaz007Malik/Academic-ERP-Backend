@@ -227,7 +227,7 @@ export async function getMe(userId) {
   };
 }
 
-export async function changePassword(userId, currentPassword, newPassword) {
+export async function changePassword(userId, currentPassword, newPassword, accessJti, accessExp) {
   const { assertPasswordPolicy, savePasswordHistory } = await import('../../security/securityPolicies.js');
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new AppError('User not found', 404);
@@ -238,12 +238,22 @@ export async function changePassword(userId, currentPassword, newPassword) {
   await assertPasswordPolicy(userId, newPassword);
 
   const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  const trimmed = newPassword.trim();
+
+  // Keep history of the password being replaced
+  await savePasswordHistory(userId, user.passwordHash);
+
   await prisma.user.update({
     where: { id: userId },
-    data: { passwordHash, mustChangePass: false, portalPassword: null },
+    data: {
+      passwordHash,
+      mustChangePass: false,
+      portalPassword: trimmed,
+    },
   });
   await savePasswordHistory(userId, passwordHash);
 
+  if (accessJti && accessExp) await denylistToken(accessJti, accessExp);
   await revokeAllUserTokens(userId);
 }
 

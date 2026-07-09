@@ -39,6 +39,12 @@ export async function assertPasswordPolicy(userId, newPassword) {
   if (strengthError) {
     throw new AppError(strengthError, 400);
   }
+
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+  if (user && await bcrypt.compare(newPassword, user.passwordHash)) {
+    throw new AppError('New password must be different from your current password', 400);
+  }
+
   const history = await prisma.passwordHistory.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },

@@ -74,10 +74,21 @@ export async function me(req, res, next) {
 
 export async function changePassword(req, res, next) {
   try {
+    let accessJti;
+    let accessExp;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      const decoded = jwt.decode(authHeader.slice(7));
+      accessJti = decoded?.jti;
+      accessExp = decoded?.exp;
+    }
+
     await authService.changePassword(
       req.user.id,
       req.body.currentPassword,
-      req.body.newPassword
+      req.body.newPassword,
+      accessJti,
+      accessExp,
     );
     clearRefreshCookie(res);
     return success(res, null, 'Password changed. Please login again.');
