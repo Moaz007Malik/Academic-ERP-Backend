@@ -198,6 +198,7 @@ model Institute {
   students           Student[]
   teachers           Teacher[]
   departments        Department[]
+  academicClasses    AcademicClass[]
   courses            Course[]
   subjects           Subject[]
   batches            Batch[]
@@ -357,9 +358,31 @@ model Department {
   code        String?   @db.VarChar(20)
   createdAt   DateTime  @default(now())
 
-  courses Course[]
-  teachers Teacher[]
+  courses         Course[]
+  academicClasses AcademicClass[]
+  teachers        Teacher[]
 
+  @@index([instituteId])
+}
+
+/// Academic class e.g. Nursery, Prep, Class 1–10 (holds subjects + default fees)
+model AcademicClass {
+  id              String     @id @default(uuid())
+  instituteId     String
+  institute       Institute  @relation(fields: [instituteId], references: [id])
+  departmentId    String
+  department      Department @relation(fields: [departmentId], references: [id])
+  name            String     @db.VarChar(100)
+  code            String?    @db.VarChar(20)
+  registrationFee Decimal    @default(0) @db.Decimal(10, 2)
+  monthlyFee      Decimal    @default(0) @db.Decimal(10, 2)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  subjects Subject[]
+  batches  Batch[]
+
+  @@unique([instituteId, departmentId, name])
   @@index([instituteId])
 }
 
@@ -380,15 +403,18 @@ model Course {
 }
 
 model Subject {
-  id          String    @id @default(uuid())
+  id          String         @id @default(uuid())
   instituteId String
-  institute   Institute @relation(fields: [instituteId], references: [id])
-  courseId    String
-  course      Course    @relation(fields: [courseId], references: [id])
-  name        String    @db.VarChar(200)
-  code        String?   @db.VarChar(20)
-  creditHours Int       @default(0)
-  createdAt   DateTime  @default(now())
+  institute   Institute      @relation(fields: [instituteId], references: [id])
+  /// Linked to AcademicClass (preferred). Course link kept for legacy rows.
+  classId     String?
+  academicClass AcademicClass? @relation(fields: [classId], references: [id], onDelete: Cascade)
+  courseId    String?
+  course      Course?        @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  name        String         @db.VarChar(200)
+  code        String?        @db.VarChar(20)
+  creditHours Int            @default(0)
+  createdAt   DateTime       @default(now())
 
   attendance Attendance[]
   results    Result[]
@@ -399,6 +425,7 @@ model Subject {
   questionBanks QuestionBank[]
 
   @@index([instituteId])
+  @@index([classId])
 }
 
 model Session {
@@ -436,19 +463,22 @@ model Semester {
 }
 
 model Batch {
-  id          String    @id @default(uuid())
+  id          String         @id @default(uuid())
   instituteId String
-  institute   Institute @relation(fields: [instituteId], references: [id])
+  institute   Institute      @relation(fields: [instituteId], references: [id])
   sessionId   String?
-  session     Session?  @relation(fields: [sessionId], references: [id])
-  name        String    @db.VarChar(100)
+  session     Session?       @relation(fields: [sessionId], references: [id])
+  classId     String?
+  academicClass AcademicClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
+  name        String         @db.VarChar(100)
   year        Int?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime       @default(now())
 
   sections Section[]
   students Student[]
 
   @@index([instituteId])
+  @@index([classId])
 }
 
 model Section {
@@ -504,6 +534,11 @@ model Student {
   currentBatch     Batch?        @relation(fields: [currentBatchId], references: [id])
   currentSectionId String?
   currentSection   Section?      @relation(fields: [currentSectionId], references: [id])
+  /// Snapshot of Class fees at admission (do not auto-change when Class fees update)
+  assignedRegistrationFee Decimal? @db.Decimal(10, 2)
+  assignedMonthlyFee      Decimal? @db.Decimal(10, 2)
+  registrationDiscount    Decimal  @default(0) @db.Decimal(10, 2)
+  monthlyDiscount         Decimal  @default(0) @db.Decimal(10, 2)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 

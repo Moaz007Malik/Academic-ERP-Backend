@@ -58,36 +58,58 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+function toDecimal(value, fallback = 0) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function toInt(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 router.post('/', async (req, res, next) => {
   try {
     const {
       name, code, duration, startDate, endDate, capacity, description, status,
       admissionFee, monthlyFee, oneTimeFee, discountAmount, scholarshipAmount, teacherIds = [],
     } = req.body;
-    if (!name || !code) throw new AppError('Name and code are required', 400);
+    if (!name?.trim() || !code?.trim()) throw new AppError('Name and code are required', 400);
 
     const instituteId = req.user.instituteId;
-    const dup = await prisma.individualCourse.findFirst({ where: { instituteId, code } });
+    const normalizedCode = String(code).trim().toUpperCase();
+    const dup = await prisma.individualCourse.findFirst({ where: { instituteId, code: normalizedCode } });
     if (dup) throw new AppError('Course code already exists', 409);
+
+    const validStatuses = ['DRAFT', 'ACTIVE', 'COMPLETED', 'CANCELLED'];
+    const courseStatus = validStatuses.includes(status) ? status : 'ACTIVE';
+    const teacherIdList = Array.isArray(teacherIds) ? teacherIds.filter(Boolean) : [];
 
     const course = await prisma.$transaction(async (tx) => {
       const c = await tx.individualCourse.create({
         data: {
-          instituteId, name, code, duration, description,
+          instituteId,
+          name: name.trim(),
+          code: normalizedCode,
+          duration: duration?.trim() || null,
+          description: description?.trim() || null,
           startDate: startDate ? new Date(startDate) : null,
           endDate: endDate ? new Date(endDate) : null,
-          capacity: capacity || 30,
-          status: status || 'ACTIVE',
-          admissionFee: admissionFee ?? 0,
-          monthlyFee: monthlyFee ?? 0,
-          oneTimeFee: oneTimeFee ?? 0,
-          discountAmount: discountAmount ?? 0,
-          scholarshipAmount: scholarshipAmount ?? 0,
+          capacity: toInt(capacity, 30),
+          status: courseStatus,
+          admissionFee: toDecimal(admissionFee),
+          monthlyFee: toDecimal(monthlyFee),
+          oneTimeFee: toDecimal(oneTimeFee),
+          discountAmount: toDecimal(discountAmount),
+          scholarshipAmount: toDecimal(scholarshipAmount),
         },
       });
-      if (teacherIds.length) {
+      if (teacherIdList.length) {
         await tx.individualCourseTeacher.createMany({
-          data: teacherIds.map((teacherId) => ({ courseId: c.id, teacherId })),
+          data: teacherIdList.map((teacherId) => ({ courseId: c.id, teacherId })),
+          skipDuplicates: true,
         });
       }
       return c;
@@ -108,25 +130,27 @@ router.put('/:id', async (req, res, next) => {
       const updated = await tx.individualCourse.update({
         where: { id: req.params.id },
         data: {
-          ...(data.name !== undefined && { name: data.name }),
-          ...(data.duration !== undefined && { duration: data.duration }),
-          ...(data.description !== undefined && { description: data.description }),
+          ...(data.name !== undefined && { name: String(data.name).trim() }),
+          ...(data.duration !== undefined && { duration: data.duration?.trim() || null }),
+          ...(data.description !== undefined && { description: data.description?.trim() || null }),
           ...(data.startDate !== undefined && { startDate: data.startDate ? new Date(data.startDate) : null }),
           ...(data.endDate !== undefined && { endDate: data.endDate ? new Date(data.endDate) : null }),
-          ...(data.capacity !== undefined && { capacity: data.capacity }),
+          ...(data.capacity !== undefined && { capacity: toInt(data.capacity, existing.capacity) }),
           ...(data.status !== undefined && { status: data.status }),
-          ...(data.admissionFee !== undefined && { admissionFee: data.admissionFee }),
-          ...(data.monthlyFee !== undefined && { monthlyFee: data.monthlyFee }),
-          ...(data.oneTimeFee !== undefined && { oneTimeFee: data.oneTimeFee }),
-          ...(data.discountAmount !== undefined && { discountAmount: data.discountAmount }),
-          ...(data.scholarshipAmount !== undefined && { scholarshipAmount: data.scholarshipAmount }),
+          ...(data.admissionFee !== undefined && { admissionFee: toDecimal(data.admissionFee) }),
+          ...(data.monthlyFee !== undefined && { monthlyFee: toDecimal(data.monthlyFee) }),
+          ...(data.oneTimeFee !== undefined && { oneTimeFee: toDecimal(data.oneTimeFee) }),
+          ...(data.discountAmount !== undefined && { discountAmount: toDecimal(data.discountAmount) }),
+          ...(data.scholarshipAmount !== undefined && { scholarshipAmount: toDecimal(data.scholarshipAmount) }),
         },
       });
       if (teacherIds) {
         await tx.individualCourseTeacher.deleteMany({ where: { courseId: req.params.id } });
-        if (teacherIds.length) {
+        const teacherIdList = Array.isArray(teacherIds) ? teacherIds.filter(Boolean) : [];
+        if (teacherIdList.length) {
           await tx.individualCourseTeacher.createMany({
-            data: teacherIds.map((teacherId) => ({ courseId: req.params.id, teacherId })),
+            data: teacherIdList.map((teacherId) => ({ courseId: req.params.id, teacherId })),
+            skipDuplicates: true,
           });
         }
       }

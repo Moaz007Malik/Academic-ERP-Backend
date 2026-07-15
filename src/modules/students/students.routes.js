@@ -9,6 +9,9 @@ import { blockExpiredModuleAccess } from '../../middleware/subscriptionGuard.js'
 import { createPortalUser, generateRollNumber } from '../../utils/portalUser.js';
 import { AppError } from '../../utils/AppError.js';
 import { getStudentProfile } from '../../services/profile.service.js';
+import {
+  assignStudentClassFees, getClassFeesForBatch, calcNetFee,
+} from '../../services/studentClassFee.service.js';
 
 const router = Router();
 
@@ -36,8 +39,8 @@ router.get('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) => 
       ];
     }
 
-    // Require at least section, batch, or search (sectionId alone for attendance etc.)
-    if (!req.query.search?.trim() && !req.query.sectionId && !req.query.batchId) {
+    // Require section, batch, or search — unless explicitly listing for enrollment pickers
+    if (!req.query.search?.trim() && !req.query.sectionId && !req.query.batchId && req.query.forPicker !== '1') {
       return paginated(res, [], buildPaginationMeta(0, page, limit), 'Select class and section to view students');
     }
 
@@ -60,6 +63,20 @@ router.get('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) => 
   } catch (err) {
     next(err);
   }
+});
+
+router.get('/fee-preview', requirePermission('MANAGE_STUDENTS'), async (req, res, next) => {
+  try {
+    const { batchId } = req.query;
+    if (!batchId) throw new AppError('batchId required', 400);
+    const fees = await getClassFeesForBatch(prisma, batchId, req.user.instituteId);
+    return success(res, {
+      registrationFee: fees.registrationFee,
+      monthlyFee: fees.monthlyFee,
+      className: fees.academicClass?.name || null,
+      classId: fees.academicClass?.id || null,
+    });
+  } catch (err) { next(err); }
 });
 
 router.get('/:id/profile', requirePermission('MANAGE_STUDENTS'), async (req, res, next) => {
@@ -96,6 +113,7 @@ router.post('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) =>
       dateOfBirth, gender, cnic, phone, address,
       guardianName, guardianPhone, currentBatchId, currentSectionId,
       createPortalAccount,
+      registrationDiscount, monthlyDiscount,
     } = req.body;
 
     if (!firstName || !lastName) throw new AppError('First and last name are required', 400);
@@ -111,7 +129,10 @@ router.post('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) =>
       if (dup) throw new AppError('A student with this roll number already exists', 409);
     }
 
-    const student = await prisma.$transaction(async (tx) => {
+    const regDisc = Number(registrationDiscount) || 0;
+    const monthDisc = Number(monthlyDiscount) || 0;
+
+    const result = await prisma.$transaction(async (tx) => {
       let userId = null;
       if (createPortalAccount !== false && email) {
         const existing = await tx.user.findUnique({ where: { email: email.toLowerCase() } });
@@ -127,7 +148,15 @@ router.post('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) =>
         userId = user.id;
       }
 
-      return tx.student.create({
+      let assignedRegistrationFee = null;
+      let assignedMonthlyFee = null;
+      if (currentBatchId) {
+        const fees = await getClassFeesForBatch(tx, currentBatchId, instituteId);
+        assignedRegistrationFee = fees.registrationFee;
+        assignedMonthlyFee = fees.monthlyFee;
+      }
+
+      const student = await tx.student.create({
         data: {
           instituteId,
           userId,
@@ -143,18 +172,53 @@ router.post('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) =>
           guardianPhone: guardianPhone || null,
           currentBatchId: currentBatchId || null,
           currentSectionId: currentSectionId || null,
+          assignedRegistrationFee,
+          assignedMonthlyFee,
+          registrationDiscount: regDisc,
+          monthlyDiscount: monthDisc,
           enrollmentDate: new Date(),
           status: 'ACTIVE',
         },
-        include: { currentBatch: true, currentSection: true, user: { select: { email: true, portalPassword: true } } },
+        include: {
+          currentBatch: { include: { academicClass: true } },
+          currentSection: true,
+          user: { select: { email: true, portalPassword: true } },
+        },
       });
+
+      let feesAssigned = 0;
+      if (currentBatchId && (assignedRegistrationFee > 0 || assignedMonthlyFee > 0)) {
+        const fees = await assignStudentClassFees(tx, {
+          instituteId,
+          student,
+          registrationFee: assignedRegistrationFee,
+          monthlyFee: assignedMonthlyFee,
+          registrationDiscount: regDisc,
+          monthlyDiscount: monthDisc,
+        });
+        feesAssigned = fees.length;
+      }
+
+      return { student, feesAssigned };
     });
 
-    const portalCreds = student.user
-      ? { email: student.user.email, password: password || 'Student@123' }
+    const portalCreds = result.student.user
+      ? { email: result.student.user.email, password: password || 'Student@123' }
       : null;
 
-    return success(res, { student, portalCredentials: portalCreds }, 'Student created', 201);
+    return success(res, {
+      student: result.student,
+      portalCredentials: portalCreds,
+      feesAssigned: result.feesAssigned,
+      feePreview: {
+        registrationFee: result.student.assignedRegistrationFee,
+        monthlyFee: result.student.assignedMonthlyFee,
+        registrationDiscount: regDisc,
+        monthlyDiscount: monthDisc,
+        netRegistration: calcNetFee(result.student.assignedRegistrationFee, regDisc),
+        netMonthly: calcNetFee(result.student.assignedMonthlyFee, monthDisc),
+      },
+    }, 'Student created', 201);
   } catch (err) {
     next(err);
   }
