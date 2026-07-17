@@ -46,9 +46,12 @@ export async function assignStudentClassFees(tx, {
     || student.currentBatch?.name
     || 'Class';
 
-  const netReg = calcNetFee(registrationFee, registrationDiscount);
+  const origReg = Number(registrationFee) || 0;
+  const regDisc = Math.min(Number(registrationDiscount) || 0, origReg);
+  const netReg = calcNetFee(origReg, regDisc);
+
   const regStructure = await getOrCreateStructure(
-    tx, instituteId, `${className} - Registration Fee`, registrationFee || netReg, 'ONE_TIME',
+    tx, instituteId, `${className} - Registration Fee`, origReg || netReg, 'ONE_TIME',
   );
   if (regStructure && netReg > 0) {
     const dup = await tx.fee.findFirst({
@@ -67,19 +70,22 @@ export async function assignStudentClassFees(tx, {
           instituteId,
           studentId: student.id,
           feeStructureId: regStructure.id,
-          amount: registrationFee || netReg,
-          discount: registrationDiscount || 0,
+          amount: origReg,
+          discount: regDisc,
           status: 'PENDING',
           assignmentScope: 'INDIVIDUAL',
-          notes: `Registration fee for ${className}`,
+          notes: `Registration — Original: ${origReg}, Discount: ${regDisc}, Payable: ${netReg}`,
         },
       }));
     }
   }
 
-  const netMonthly = calcNetFee(monthlyFee, monthlyDiscount);
+  const origMonthly = Number(monthlyFee) || 0;
+  const monthDisc = Math.min(Number(monthlyDiscount) || 0, origMonthly);
+  const netMonthly = calcNetFee(origMonthly, monthDisc);
+
   const monthlyStructure = await getOrCreateStructure(
-    tx, instituteId, `${className} - Monthly Fee`, monthlyFee || netMonthly, 'MONTHLY',
+    tx, instituteId, `${className} - Monthly Fee`, origMonthly || netMonthly, 'MONTHLY',
   );
   if (monthlyStructure && netMonthly > 0) {
     const dup = await tx.fee.findFirst({
@@ -98,11 +104,11 @@ export async function assignStudentClassFees(tx, {
           instituteId,
           studentId: student.id,
           feeStructureId: monthlyStructure.id,
-          amount: monthlyFee || netMonthly,
-          discount: monthlyDiscount || 0,
+          amount: origMonthly,
+          discount: monthDisc,
           status: 'PENDING',
           assignmentScope: 'INDIVIDUAL',
-          notes: `Monthly fee for ${className}`,
+          notes: `Monthly — Original: ${origMonthly}, Discount: ${monthDisc}, Payable: ${netMonthly}`,
         },
       }));
     }

@@ -306,6 +306,7 @@ router.post('/:id/collect', async (req, res, next) => {
     if (!fee) throw new AppError('Fee not found', 404);
 
     const receiptNumber = `RCP-${Date.now()}`;
+    const payable = Math.max(0, Number(fee.amount || 0) + Number(req.body.fine ?? fee.fine ?? 0) - Number(fee.discount || 0));
     const updated = await prisma.fee.update({
       where: { id: fee.id },
       data: {
@@ -325,7 +326,9 @@ router.post('/:id/collect', async (req, res, next) => {
       payload: {
         feeId: fee.id,
         studentId: fee.studentId,
-        amount: Number(updated.amount),
+        amount: payable,
+        originalAmount: Number(fee.amount),
+        discount: Number(fee.discount || 0),
         receiptNumber,
         actorId: req.user.id,
       },

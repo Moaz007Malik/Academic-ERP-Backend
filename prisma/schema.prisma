@@ -643,6 +643,11 @@ enum IndividualCourseStatus {
   CANCELLED
 }
 
+enum IndividualCoursePaymentType {
+  MONTHLY
+  ONE_TIME
+}
+
 enum CourseEnrollmentStatus {
   ENROLLED
   COMPLETED
@@ -662,6 +667,7 @@ model IndividualCourse {
   capacity          Int                    @default(30)
   description       String?
   status            IndividualCourseStatus @default(ACTIVE)
+  paymentType       IndividualCoursePaymentType @default(ONE_TIME)
   admissionFee      Decimal                @default(0) @db.Decimal(10, 2)
   monthlyFee        Decimal                @default(0) @db.Decimal(10, 2)
   oneTimeFee        Decimal                @default(0) @db.Decimal(10, 2)

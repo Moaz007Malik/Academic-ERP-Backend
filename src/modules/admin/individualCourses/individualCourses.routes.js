@@ -74,7 +74,7 @@ router.post('/', async (req, res, next) => {
   try {
     const {
       name, code, duration, startDate, endDate, capacity, description, status,
-      admissionFee, monthlyFee, oneTimeFee, discountAmount, scholarshipAmount, teacherIds = [],
+      paymentType, admissionFee, monthlyFee, oneTimeFee, discountAmount, scholarshipAmount, teacherIds = [],
     } = req.body;
     if (!name?.trim() || !code?.trim()) throw new AppError('Name and code are required', 400);
 
@@ -85,6 +85,7 @@ router.post('/', async (req, res, next) => {
 
     const validStatuses = ['DRAFT', 'ACTIVE', 'COMPLETED', 'CANCELLED'];
     const courseStatus = validStatuses.includes(status) ? status : 'ACTIVE';
+    const coursePaymentType = paymentType === 'MONTHLY' ? 'MONTHLY' : 'ONE_TIME';
     const teacherIdList = Array.isArray(teacherIds) ? teacherIds.filter(Boolean) : [];
 
     const course = await prisma.$transaction(async (tx) => {
@@ -99,6 +100,7 @@ router.post('/', async (req, res, next) => {
           endDate: endDate ? new Date(endDate) : null,
           capacity: toInt(capacity, 30),
           status: courseStatus,
+          paymentType: coursePaymentType,
           admissionFee: toDecimal(admissionFee),
           monthlyFee: toDecimal(monthlyFee),
           oneTimeFee: toDecimal(oneTimeFee),
@@ -137,6 +139,9 @@ router.put('/:id', async (req, res, next) => {
           ...(data.endDate !== undefined && { endDate: data.endDate ? new Date(data.endDate) : null }),
           ...(data.capacity !== undefined && { capacity: toInt(data.capacity, existing.capacity) }),
           ...(data.status !== undefined && { status: data.status }),
+          ...(data.paymentType !== undefined && {
+            paymentType: data.paymentType === 'MONTHLY' ? 'MONTHLY' : 'ONE_TIME',
+          }),
           ...(data.admissionFee !== undefined && { admissionFee: toDecimal(data.admissionFee) }),
           ...(data.monthlyFee !== undefined && { monthlyFee: toDecimal(data.monthlyFee) }),
           ...(data.oneTimeFee !== undefined && { oneTimeFee: toDecimal(data.oneTimeFee) }),
@@ -179,7 +184,11 @@ router.post('/:id/enroll', async (req, res, next) => {
     const result = await prisma.$transaction(async (tx) => {
       let sid = studentId;
       if (!sid && newStudent) {
-        const { firstName, lastName, email, password, phone } = newStudent;
+        const {
+          firstName, lastName, email, password, phone, dateOfBirth, gender, cnic, address,
+          guardianName, guardianPhone, guardianRelation, guardianEmail,
+          fatherName, motherName, bloodGroup, admissionNumber, registrationNumber, notes, photo,
+        } = newStudent;
         if (!firstName || !lastName) throw new AppError('Student name required', 400);
         const count = await tx.student.count({ where: { instituteId } });
         const institute = await tx.institute.findUnique({ where: { id: instituteId } });
@@ -193,13 +202,29 @@ router.post('/:id/enroll', async (req, res, next) => {
         }
         const st = await tx.student.create({
           data: {
-            instituteId, userId, firstName, lastName, phone: phone || null,
+            instituteId,
+            userId,
+            firstName,
+            lastName,
+            phone: phone || null,
             rollNumber: generateRollNumber(prefix, count + 1),
-            enrollmentDate: new Date(), status: 'ACTIVE',
-            ...(newStudent.dateOfBirth && { dateOfBirth: new Date(newStudent.dateOfBirth) }),
-            ...(newStudent.gender && { gender: newStudent.gender }),
-            ...(newStudent.guardianName && { guardianName: newStudent.guardianName }),
-            ...(newStudent.guardianPhone && { guardianPhone: newStudent.guardianPhone }),
+            enrollmentDate: new Date(),
+            status: 'ACTIVE',
+            dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+            gender: gender || null,
+            cnic: cnic || null,
+            address: address || null,
+            guardianName: guardianName || null,
+            guardianPhone: guardianPhone || null,
+            guardianRelation: guardianRelation || null,
+            guardianEmail: guardianEmail || null,
+            fatherName: fatherName || null,
+            motherName: motherName || null,
+            bloodGroup: bloodGroup || null,
+            admissionNumber: admissionNumber || null,
+            registrationNumber: registrationNumber || null,
+            notes: notes || null,
+            photo: photo || null,
           },
         });
         sid = st.id;
