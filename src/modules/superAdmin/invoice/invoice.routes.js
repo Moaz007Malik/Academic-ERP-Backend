@@ -11,6 +11,12 @@ router.get('/', async (req, res, next) => {
     const { page, limit, skip } = parsePagination(req.query);
     const where = {};
     if (req.query.status) where.status = req.query.status;
+    if (req.query.search) {
+      where.OR = [
+        { invoiceNumber: { contains: req.query.search, mode: 'insensitive' } },
+        { institute: { name: { contains: req.query.search, mode: 'insensitive' } } },
+      ];
+    }
 
     const [invoices, total] = await Promise.all([
       prisma.subscriptionInvoice.findMany({

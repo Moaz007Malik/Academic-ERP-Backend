@@ -11,6 +11,7 @@ import {
   getIndividualCourseStudentFees,
 } from '../../../services/financeHub.service.js';
 import { getEffectiveSemesterFee } from '../../../services/degreeFee.service.js';
+import { aggregateFeeTotals } from '../../../services/fee.service.js';
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.FEES_FINANCE));
@@ -25,6 +26,63 @@ router.get('/modules', async (req, res, next) => {
       { key: 'INDIVIDUAL_COURSE', label: 'Individual Course', enabled: enabled.has(MODULE_KEYS.INDIVIDUAL_COURSES) },
     ].filter((o) => o.enabled);
     return success(res, options);
+  } catch (err) { next(err); }
+});
+
+// ─── Cross-track dashboard ─────────────────────────────────────────────────────
+
+router.get('/dashboard', async (req, res, next) => {
+  try {
+    const instituteId = req.user.instituteId;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const allFees = await prisma.fee.findMany({
+      where: { instituteId },
+      select: {
+        track: true, status: true, amount: true, discount: true, fine: true, dueDate: true, paidDate: true,
+        _count: { select: { installments: true } },
+      },
+    });
+    // Once a fee is split into installments, the split children (not the now-just-a-grouping
+    // parent) carry the real per-period status/amount — count only leaf rows to avoid double-counting.
+    const fees = allFees.filter((f) => f._count.installments === 0);
+
+    const net = (f) => Number(f.amount) - Number(f.discount || 0) + Number(f.fine || 0);
+    const byTrack = { ACADEMIC: [], DEGREE: [], INDIVIDUAL_COURSE: [] };
+    for (const f of fees) byTrack[f.track]?.push(f);
+
+    const summarizeTrack = (list) => {
+      const paid = list.filter((f) => f.status === 'PAID');
+      const pending = list.filter((f) => f.status === 'PENDING' || f.status === 'PARTIAL');
+      const overdue = pending.filter((f) => f.dueDate && new Date(f.dueDate) < today);
+      const waived = list.filter((f) => f.status === 'WAIVED');
+      return {
+        collected: paid.reduce((s, f) => s + net(f), 0),
+        pending: pending.reduce((s, f) => s + net(f), 0),
+        overdue: overdue.reduce((s, f) => s + net(f), 0),
+        discounts: list.reduce((s, f) => s + Number(f.discount || 0), 0),
+        waived: waived.reduce((s, f) => s + net(f), 0),
+        count: list.length,
+        overdueCount: overdue.length,
+      };
+    };
+
+    const overall = summarizeTrack(fees);
+    const byTrackSummary = Object.fromEntries(
+      Object.entries(byTrack).map(([track, list]) => [track, summarizeTrack(list)]),
+    );
+
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const recentPayments = await prisma.fee.findMany({
+      where: { instituteId, status: 'PAID', paidDate: { gte: thirtyDaysAgo } },
+      include: { student: { select: { firstName: true, lastName: true, rollNumber: true } }, feeStructure: true },
+      orderBy: { paidDate: 'desc' },
+      take: 10,
+    });
+
+    return success(res, { overall, byTrack: byTrackSummary, recentPayments });
   } catch (err) { next(err); }
 });
 
@@ -79,29 +137,22 @@ router.get('/academic/students', async (req, res, next) => {
         currentBatch: { include: { session: true } },
         currentSection: true,
         fees: {
-          where: { degreeStudentId: null, individualCourseEnrollmentId: null },
+          where: { track: 'ACADEMIC' },
           select: { status: true, amount: true, discount: true, fine: true },
         },
       },
       orderBy: { rollNumber: 'asc' },
     });
 
-    const rows = students.map((s) => {
-      const pending = s.fees.filter((f) => f.status === 'PENDING' || f.status === 'PARTIAL');
-      const paid = s.fees.filter((f) => f.status === 'PAID');
-      const paidAmt = paid.reduce((sum, f) => sum + Number(f.amount) - Number(f.discount || 0) + Number(f.fine || 0), 0);
-      const dueAmt = pending.reduce((sum, f) => sum + Number(f.amount) - Number(f.discount || 0) + Number(f.fine || 0), 0);
-      return {
-        id: s.id,
-        firstName: s.firstName,
-        lastName: s.lastName,
-        rollNumber: s.rollNumber,
-        batch: s.currentBatch,
-        section: s.currentSection,
-        paidAmount: paidAmt,
-        dueAmount: dueAmt,
-      };
-    });
+    const rows = students.map((s) => ({
+      id: s.id,
+      firstName: s.firstName,
+      lastName: s.lastName,
+      rollNumber: s.rollNumber,
+      batch: s.currentBatch,
+      section: s.currentSection,
+      ...aggregateFeeTotals(s.fees),
+    }));
     return success(res, rows);
   } catch (err) { next(err); }
 });
@@ -173,26 +224,21 @@ router.get('/degree/students', async (req, res, next) => {
       where,
       include: {
         student: { select: { id: true, firstName: true, lastName: true, rollNumber: true } },
-        fees: { select: { status: true, amount: true, discount: true } },
+        fees: { select: { status: true, amount: true, discount: true, fine: true } },
       },
       orderBy: { admittedAt: 'desc' },
     });
 
-    const rows = students.map((ds) => {
-      const pending = ds.fees.filter((f) => f.status === 'PENDING' || f.status === 'PARTIAL');
-      const paid = ds.fees.filter((f) => f.status === 'PAID');
-      return {
-        id: ds.id,
-        studentId: ds.studentId,
-        student: ds.student,
-        currentSemesterNumber: ds.currentSemesterNumber,
-        netSemesterFee: ds.netSemesterFee,
-        discount: ds.discount,
-        scholarship: ds.scholarship,
-        paidAmount: paid.reduce((s, f) => s + Number(f.amount) - Number(f.discount || 0), 0),
-        dueAmount: pending.reduce((s, f) => s + Number(f.amount) - Number(f.discount || 0), 0),
-      };
-    });
+    const rows = students.map((ds) => ({
+      id: ds.id,
+      studentId: ds.studentId,
+      student: ds.student,
+      currentSemesterNumber: ds.currentSemesterNumber,
+      netSemesterFee: ds.netSemesterFee,
+      discount: ds.discount,
+      scholarship: ds.scholarship,
+      ...aggregateFeeTotals(ds.fees),
+    }));
     return success(res, rows);
   } catch (err) { next(err); }
 });
@@ -229,25 +275,20 @@ router.get('/individual-courses/students', async (req, res, next) => {
       },
       include: {
         student: { select: { id: true, firstName: true, lastName: true, rollNumber: true } },
-        fees: { select: { status: true, amount: true, discount: true } },
+        fees: { select: { status: true, amount: true, discount: true, fine: true } },
         course: true,
       },
       orderBy: { enrolledAt: 'desc' },
     });
 
-    const rows = enrollments.map((e) => {
-      const pending = e.fees.filter((f) => f.status === 'PENDING' || f.status === 'PARTIAL');
-      const paid = e.fees.filter((f) => f.status === 'PAID');
-      return {
-        id: e.id,
-        studentId: e.studentId,
-        student: e.student,
-        course: e.course,
-        feeDue: e.feeDue,
-        paidAmount: paid.reduce((s, f) => s + Number(f.amount) - Number(f.discount || 0), 0),
-        dueAmount: pending.reduce((s, f) => s + Number(f.amount) - Number(f.discount || 0), 0),
-      };
-    });
+    const rows = enrollments.map((e) => ({
+      id: e.id,
+      studentId: e.studentId,
+      student: e.student,
+      course: e.course,
+      feeDue: e.feeDue,
+      ...aggregateFeeTotals(e.fees),
+    }));
     return success(res, rows);
   } catch (err) { next(err); }
 });

@@ -100,7 +100,7 @@ export async function changePassword(req, res, next) {
 export async function forgotPassword(req, res, next) {
   try {
     const result = await authService.forgotPassword(req.body.email);
-    return success(res, null, result.message);
+    return success(res, result.devOtp ? { devOtp: result.devOtp } : null, result.message);
   } catch (err) {
     next(err);
   }

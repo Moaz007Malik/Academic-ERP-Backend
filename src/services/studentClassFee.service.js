@@ -1,15 +1,5 @@
 /** Assign Registration + Monthly fees from Academic Class for a student */
-async function getOrCreateStructure(tx, instituteId, name, amount, frequency) {
-  const amt = Number(amount);
-  if (!amt || amt <= 0) return null;
-  let structure = await tx.feeStructure.findFirst({ where: { instituteId, name } });
-  if (!structure) {
-    structure = await tx.feeStructure.create({
-      data: { instituteId, name, amount: amt, frequency: frequency || 'ONE_TIME' },
-    });
-  }
-  return structure;
-}
+import { getOrCreateFeeStructure } from './fee.service.js';
 
 export function calcNetFee(amount, discount = 0) {
   return Math.max(0, Number(amount || 0) - Number(discount || 0));
@@ -50,9 +40,9 @@ export async function assignStudentClassFees(tx, {
   const regDisc = Math.min(Number(registrationDiscount) || 0, origReg);
   const netReg = calcNetFee(origReg, regDisc);
 
-  const regStructure = await getOrCreateStructure(
-    tx, instituteId, `${className} - Registration Fee`, origReg || netReg, 'ONE_TIME',
-  );
+  const regStructure = await getOrCreateFeeStructure(tx, {
+    instituteId, name: `${className} - Registration Fee`, amount: origReg || netReg, frequency: 'ONE_TIME',
+  });
   if (regStructure && netReg > 0) {
     const dup = await tx.fee.findFirst({
       where: {
@@ -68,6 +58,7 @@ export async function assignStudentClassFees(tx, {
       created.push(await tx.fee.create({
         data: {
           instituteId,
+          track: 'ACADEMIC',
           studentId: student.id,
           feeStructureId: regStructure.id,
           amount: origReg,
@@ -84,9 +75,9 @@ export async function assignStudentClassFees(tx, {
   const monthDisc = Math.min(Number(monthlyDiscount) || 0, origMonthly);
   const netMonthly = calcNetFee(origMonthly, monthDisc);
 
-  const monthlyStructure = await getOrCreateStructure(
-    tx, instituteId, `${className} - Monthly Fee`, origMonthly || netMonthly, 'MONTHLY',
-  );
+  const monthlyStructure = await getOrCreateFeeStructure(tx, {
+    instituteId, name: `${className} - Monthly Fee`, amount: origMonthly || netMonthly, frequency: 'MONTHLY',
+  });
   if (monthlyStructure && netMonthly > 0) {
     const dup = await tx.fee.findFirst({
       where: {
@@ -102,6 +93,7 @@ export async function assignStudentClassFees(tx, {
       created.push(await tx.fee.create({
         data: {
           instituteId,
+          track: 'ACADEMIC',
           studentId: student.id,
           feeStructureId: monthlyStructure.id,
           amount: origMonthly,

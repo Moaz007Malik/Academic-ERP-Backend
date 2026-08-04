@@ -26,15 +26,15 @@ export async function getDegreeStudentProfile(degreeStudentId, instituteId) {
     orderBy: { createdAt: 'desc' },
   });
 
-  const results = await prisma.degreeResult.findMany({
-    where: { degreeStudentId: ds.id, instituteId },
-    include: { course: true, semester: true },
-    orderBy: [{ semester: { number: 'asc' } }, { course: { name: 'asc' } }],
+  const results = await prisma.result.findMany({
+    where: { degreeStudentId: ds.id, instituteId, track: 'DEGREE' },
+    include: { degreeCourse: true, semester: true },
+    orderBy: [{ semester: { number: 'asc' } }, { degreeCourse: { name: 'asc' } }],
   });
 
-  const attendance = await prisma.degreeAttendance.findMany({
-    where: { degreeStudentId: ds.id, instituteId },
-    include: { course: { include: { semester: true } } },
+  const attendance = await prisma.attendance.findMany({
+    where: { degreeStudentId: ds.id, instituteId, track: 'DEGREE' },
+    include: { degreeCourse: { include: { semester: true } } },
     orderBy: { date: 'desc' },
     take: 500,
   });
@@ -64,14 +64,14 @@ export async function getDegreeStudentProfile(degreeStudentId, instituteId) {
   Object.values(bySemester).forEach((s) => {
     s.gpa = calculateSemesterGPA(s.results.map((r) => ({
       gradePoints: r.gradePoints,
-      creditHours: r.course.creditHours,
+      creditHours: r.degreeCourse.creditHours,
       isPassed: r.isPassed,
     })));
   });
 
   const attendanceBySemester = {};
   for (const a of attendance) {
-    const n = a.course.semester?.number || ds.currentSemesterNumber;
+    const n = a.degreeCourse.semester?.number || ds.currentSemesterNumber;
     if (!attendanceBySemester[n]) attendanceBySemester[n] = { total: 0, present: 0, records: [] };
     attendanceBySemester[n].total += 1;
     if (a.status === 'PRESENT') attendanceBySemester[n].present += 1;

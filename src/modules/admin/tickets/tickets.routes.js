@@ -63,6 +63,17 @@ router.post('/', async (req, res, next) => {
       include: ticketInclude,
     });
 
+    const { events } = await import('../../../events/eventBus.js');
+    await events.ticketCreated({
+      aggregateId: ticket.id,
+      instituteId: req.user.instituteId,
+      payload: {
+        subject, priority: priority || 'MEDIUM',
+        createdByName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+        actorId: req.user.id,
+      },
+    }).catch(() => {});
+
     return success(res, ticket, autoEscalate ? 'Ticket sent to Super Admin' : 'Ticket submitted', 201);
   } catch (err) {
     next(err);

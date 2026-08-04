@@ -25,13 +25,13 @@ export async function getStudentProfile(studentId, instituteId) {
       orderBy: { createdAt: 'desc' },
     }),
     prisma.attendance.findMany({
-      where: { studentId, instituteId },
+      where: { studentId, instituteId, track: 'ACADEMIC' },
       include: { subject: true },
       orderBy: { date: 'desc' },
       take: 100,
     }),
     prisma.result.findMany({
-      where: { studentId, instituteId },
+      where: { studentId, instituteId, track: 'ACADEMIC' },
       include: { exam: true, subject: true },
       orderBy: { createdAt: 'desc' },
     }),
@@ -129,13 +129,15 @@ export async function getTeacherProfile(teacherId, instituteId) {
       assignments: {
         include: {
           subject: true,
+          academicClass: true,
           section: { include: { batch: true } },
+          degreeCourse: true,
+          individualCourse: true,
         },
       },
       salaries: { orderBy: [{ year: 'desc' }, { month: 'desc' }], take: 24 },
       leaveRequests: { orderBy: { createdAt: 'desc' }, take: 20 },
       documents: { orderBy: { createdAt: 'desc' }, take: 20 },
-      individualCourses: { include: { course: true } },
     },
   });
   if (!teacher) return null;

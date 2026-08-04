@@ -22,6 +22,10 @@ async function getStudent(req) {
         where: { status: 'ACTIVE' },
         include: { batch: { include: { degree: true } } },
       },
+      courseEnrollments: {
+        where: { status: 'ENROLLED' },
+        include: { course: true },
+      },
     },
   });
   if (!student) throw new AppError('Student profile not found', 404);
@@ -39,22 +43,24 @@ router.get('/dashboard', async (req, res, next) => {
     const student = await getStudent(req);
     const instituteId = req.user.instituteId;
 
-    const [academicAttendance, degreeAttendance, recentResults, degreeResults, pendingFees] = await Promise.all([
-      prisma.attendance.findMany({ where: { studentId: student.id, instituteId } }),
-      prisma.degreeAttendance.findMany({ where: { studentId: student.id, instituteId } }),
+    const [academicAttendance, degreeAttendance, individualCourseAttendance, recentResults, degreeResults, pendingFees] = await Promise.all([
+      prisma.attendance.findMany({ where: { studentId: student.id, instituteId, track: 'ACADEMIC' } }),
+      prisma.attendance.findMany({ where: { studentId: student.id, instituteId, track: 'DEGREE' } }),
+      prisma.attendance.findMany({ where: { studentId: student.id, instituteId, track: 'INDIVIDUAL_COURSE' } }),
       prisma.result.findMany({
-        where: { studentId: student.id, instituteId, publishedAt: { not: null } },
+        where: { studentId: student.id, instituteId, track: 'ACADEMIC', publishedAt: { not: null } },
         include: { exam: true, subject: true },
         orderBy: { publishedAt: 'desc' },
         take: 5,
       }),
-      prisma.degreeResult.findMany({
+      prisma.result.findMany({
         where: {
           degreeStudent: { studentId: student.id },
           instituteId,
+          track: 'DEGREE',
           publishedAt: { not: null },
         },
-        include: { course: true, semester: true },
+        include: { degreeCourse: true, semester: true },
         orderBy: { publishedAt: 'desc' },
         take: 5,
       }),
@@ -63,15 +69,43 @@ router.get('/dashboard', async (req, res, next) => {
       }),
     ]);
 
-    const allAttendance = [...academicAttendance, ...degreeAttendance];
+    const allAttendance = [...academicAttendance, ...degreeAttendance, ...individualCourseAttendance];
     const primaryDegree = student.degreeStudents?.[0];
+
+    const enrollments = {
+      academic: student.currentBatchId
+        ? {
+          batchName: student.currentBatch?.name,
+          sectionName: student.currentSection?.name,
+          attendancePct: attendancePct(academicAttendance),
+        }
+        : null,
+      degree: primaryDegree
+        ? {
+          degreeStudentId: primaryDegree.id,
+          degreeName: primaryDegree.batch?.degree?.name,
+          batchName: primaryDegree.batch?.name,
+          semesterNumber: primaryDegree.currentSemesterNumber,
+          attendancePct: attendancePct(degreeAttendance),
+        }
+        : null,
+      individualCourses: (student.courseEnrollments || []).map((e) => ({
+        enrollmentId: e.id,
+        courseId: e.courseId,
+        courseName: e.course?.name,
+        courseCode: e.course?.code,
+        status: e.status,
+        feePaid: e.feePaid,
+        feeDue: e.feeDue,
+      })),
+    };
 
     return success(res, {
       student,
-      programType: student.currentBatchId ? (primaryDegree ? 'BOTH' : 'ACADEMIC') : (primaryDegree ? 'DEGREE' : 'ACADEMIC'),
-      degreeEnrollment: primaryDegree || null,
+      enrollments,
       stats: {
         attendancePct: attendancePct(allAttendance),
+        individualCourseAttendancePct: attendancePct(individualCourseAttendance),
         recentResultsCount: recentResults.length + degreeResults.length,
         pendingFees,
       },
@@ -95,18 +129,19 @@ router.get('/results', async (req, res, next) => {
 
     const [results, degreeResults] = await Promise.all([
       prisma.result.findMany({
-        where: { studentId: student.id, instituteId, publishedAt: { not: null } },
+        where: { studentId: student.id, instituteId, track: 'ACADEMIC', publishedAt: { not: null } },
         include: { exam: true, subject: true },
         orderBy: [{ exam: { startDate: 'desc' } }, { subject: { name: 'asc' } }],
       }),
-      prisma.degreeResult.findMany({
+      prisma.result.findMany({
         where: {
           degreeStudent: { studentId: student.id },
           instituteId,
+          track: 'DEGREE',
           publishedAt: { not: null },
         },
-        include: { course: true, semester: true, degreeStudent: { include: { batch: { include: { degree: true } } } } },
-        orderBy: [{ semester: { number: 'asc' } }, { course: { name: 'asc' } }],
+        include: { degreeCourse: true, semester: true, degreeStudent: { include: { batch: { include: { degree: true } } } } },
+        orderBy: [{ semester: { number: 'asc' } }, { degreeCourse: { name: 'asc' } }],
       }),
     ]);
 
@@ -136,7 +171,7 @@ router.get('/results', async (req, res, next) => {
     Object.values(bySemester).forEach((s) => {
       s.gpa = calculateSemesterGPA(s.subjects.map((r) => ({
         gradePoints: r.gradePoints,
-        creditHours: r.course.creditHours,
+        creditHours: r.degreeCourse.creditHours,
         isPassed: r.isPassed,
       })));
     });
@@ -159,7 +194,7 @@ router.get('/attendance', async (req, res, next) => {
     const student = await getStudent(req);
     const instituteId = req.user.instituteId;
 
-    const degreeWhere = { studentId: student.id, instituteId };
+    const degreeWhere = { studentId: student.id, instituteId, track: 'DEGREE' };
     if (req.query.semesterNumber && student.degreeStudents?.length) {
       const ds = student.degreeStudents[0];
       const sem = await prisma.degreeSemester.findFirst({
@@ -170,19 +205,24 @@ router.get('/attendance', async (req, res, next) => {
           where: { semesterId: sem.id },
           select: { id: true },
         });
-        degreeWhere.courseId = { in: courseIds.map((c) => c.id) };
+        degreeWhere.degreeCourseId = { in: courseIds.map((c) => c.id) };
       }
     }
 
-    const [academicRecords, degreeRecords] = await Promise.all([
+    const [academicRecords, degreeRecords, individualCourseRecords] = await Promise.all([
       prisma.attendance.findMany({
-        where: { studentId: student.id, instituteId },
+        where: { studentId: student.id, instituteId, track: 'ACADEMIC' },
         include: { subject: true },
         orderBy: { date: 'desc' },
       }),
-      prisma.degreeAttendance.findMany({
+      prisma.attendance.findMany({
         where: degreeWhere,
-        include: { course: { include: { semester: true } } },
+        include: { degreeCourse: { include: { semester: true } } },
+        orderBy: { date: 'desc' },
+      }),
+      prisma.attendance.findMany({
+        where: { studentId: student.id, instituteId, track: 'INDIVIDUAL_COURSE' },
+        include: { individualCourse: true },
         orderBy: { date: 'desc' },
       }),
     ]);
@@ -190,6 +230,7 @@ router.get('/attendance', async (req, res, next) => {
     const records = [
       ...academicRecords.map((r) => ({ ...r, source: 'ACADEMIC' })),
       ...degreeRecords.map((r) => ({ ...r, source: 'DEGREE' })),
+      ...individualCourseRecords.map((r) => ({ ...r, source: 'INDIVIDUAL_COURSE' })),
     ].sort((a, b) => new Date(b.date) - new Date(a.date));
 
     const total = records.length;
@@ -199,7 +240,7 @@ router.get('/attendance', async (req, res, next) => {
 
     const bySemester = {};
     for (const r of degreeRecords) {
-      const n = r.course?.semester?.number || 'unknown';
+      const n = r.degreeCourse?.semester?.number || 'unknown';
       if (!bySemester[n]) bySemester[n] = { total: 0, present: 0, records: [] };
       bySemester[n].total += 1;
       if (r.status === 'PRESENT' || r.status === 'LATE') bySemester[n].present += 1;
@@ -210,6 +251,7 @@ router.get('/attendance', async (req, res, next) => {
       records,
       academicRecords,
       degreeRecords,
+      individualCourseRecords,
       bySemester,
       summary: {
         total, present, absent, late,
@@ -316,6 +358,18 @@ router.post('/tickets', async (req, res, next) => {
         escalatedToSuperAdmin: false,
       },
     });
+
+    const { events } = await import('../../../events/eventBus.js');
+    await events.ticketCreated({
+      aggregateId: ticket.id,
+      instituteId: req.user.instituteId,
+      payload: {
+        subject, priority: priority || 'MEDIUM',
+        createdByName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+        actorId: req.user.id,
+      },
+    }).catch(() => {});
+
     return success(res, ticket, 'Ticket submitted to your institute', 201);
   } catch (err) { next(err); }
 });
@@ -353,13 +407,35 @@ router.post('/tickets/:id/reply', async (req, res, next) => {
 router.get('/timetable', async (req, res, next) => {
   try {
     const student = await getStudent(req);
-    if (!student.currentSectionId) return success(res, []);
+    const instituteId = req.user.instituteId;
 
-    const timetable = await prisma.timetable.findMany({
-      where: { instituteId: req.user.instituteId, sectionId: student.currentSectionId },
-      include: { subject: true, teacher: { select: { firstName: true, lastName: true } } },
-      orderBy: [{ dayOfWeek: 'asc' }],
-    });
+    const [academicSlots, degreeSlots, individualCourseSlots] = await Promise.all([
+      student.currentSectionId
+        ? prisma.timetable.findMany({
+          where: { instituteId, track: 'ACADEMIC', sectionId: student.currentSectionId },
+          include: { subject: true, teacher: { select: { firstName: true, lastName: true } } },
+        })
+        : [],
+      student.degreeStudents?.length
+        ? prisma.timetable.findMany({
+          where: {
+            instituteId, track: 'DEGREE',
+            degreeCourse: { semester: { batchId: student.degreeStudents[0].batchId, number: student.degreeStudents[0].currentSemesterNumber } },
+          },
+          include: { degreeCourse: { include: { semester: true } }, teacher: { select: { firstName: true, lastName: true } } },
+        })
+        : [],
+      prisma.individualCourseEnrollment.findMany({ where: { instituteId, studentId: student.id, status: 'ENROLLED' }, select: { courseId: true } })
+        .then((enrollments) => (enrollments.length
+          ? prisma.timetable.findMany({
+            where: { instituteId, track: 'INDIVIDUAL_COURSE', individualCourseId: { in: enrollments.map((e) => e.courseId) } },
+            include: { individualCourse: true, teacher: { select: { firstName: true, lastName: true } } },
+          })
+          : [])),
+    ]);
+
+    const timetable = [...academicSlots, ...degreeSlots, ...individualCourseSlots]
+      .sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startTime.localeCompare(b.startTime));
     return success(res, timetable);
   } catch (err) { next(err); }
 });

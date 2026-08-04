@@ -13,10 +13,10 @@ const HANDLERS = {
 const TYPED_HANDLERS = {
   'fee.collected': [triggerNotifications, deliverWebhooks, enqueueAnalyticsJob],
   'result.published': [triggerNotifications, deliverWebhooks, enqueueAnalyticsJob],
-  'attendance.marked': [enqueueAnalyticsJob],
+  'attendance.marked': [triggerNotifications, enqueueAnalyticsJob],
   'ticket.created': [triggerNotifications, deliverWebhooks],
   'subscription.renewed': [deliverWebhooks, enqueueAnalyticsJob],
-  'student.created': [deliverWebhooks, enqueueAnalyticsJob],
+  'student.created': [triggerNotifications, deliverWebhooks, enqueueAnalyticsJob],
 };
 
 export async function dispatchDomainEvent(event) {

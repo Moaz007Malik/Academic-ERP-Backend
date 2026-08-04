@@ -5,6 +5,9 @@ import { requireModule } from '../../../middleware/moduleGuard.js';
 import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { AppError } from '../../../utils/AppError.js';
+import { expandAcademicAssignmentsToSections } from '../../../services/teacherAssignment.service.js';
+import { markAttendance } from '../../../services/attendance.service.js';
+import { computeResult } from '../../../utils/grading.js';
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.TEACHER_PORTAL));
@@ -17,40 +20,32 @@ async function getTeacher(req) {
       assignments: {
         include: {
           subject: true,
+          academicClass: true,
           section: { include: { batch: true, students: { where: { status: 'ACTIVE' } } } },
-        },
-      },
-      individualCourses: {
-        include: {
-          course: {
-            include: {
-              enrollments: {
-                where: { status: 'ENROLLED' },
-                include: { student: true },
-              },
-            },
-          },
-        },
-      },
-      degreeCourseTeachers: {
-        include: {
-          course: {
-            include: {
-              semester: { include: { batch: { include: { degree: true } } } },
-            },
+          degreeCourse: { include: { semester: { include: { batch: { include: { degree: true } } } } } },
+          individualCourse: {
+            include: { enrollments: { where: { status: 'ENROLLED' }, include: { student: true } } },
           },
         },
       },
     },
   });
   if (!teacher) throw new AppError('Teacher profile not found', 404);
-  return teacher;
+
+  const academicAssignments = teacher.assignments.filter((a) => a.track === 'ACADEMIC');
+  const expandedClasses = await expandAcademicAssignmentsToSections({
+    instituteId: req.user.instituteId, assignments: academicAssignments,
+  });
+  const individualCourseAssignments = teacher.assignments.filter((a) => a.track === 'INDIVIDUAL_COURSE');
+  const degreeCourseAssignments = teacher.assignments.filter((a) => a.track === 'DEGREE');
+
+  return { ...teacher, academicAssignments, expandedClasses, individualCourseAssignments, degreeCourseAssignments };
 }
 
 router.get('/dashboard', async (req, res, next) => {
   try {
     const teacher = await getTeacher(req);
-    const sectionIds = [...new Set(teacher.assignments.map((a) => a.sectionId))];
+    const sectionIds = [...new Set(teacher.expandedClasses.map((c) => c.sectionId))];
     const studentCount = await prisma.student.count({
       where: { instituteId: req.user.instituteId, currentSectionId: { in: sectionIds }, status: 'ACTIVE' },
     });
@@ -63,19 +58,17 @@ router.get('/dashboard', async (req, res, next) => {
       take: 5,
       orderBy: { startDate: 'asc' },
     });
-    const icCount = teacher.individualCourses?.length || 0;
-    const degreeCount = teacher.degreeCourseTeachers?.length || 0;
     return success(res, {
       teacher: { id: teacher.id, firstName: teacher.firstName, lastName: teacher.lastName, employeeCode: teacher.employeeCode },
-      assignments: teacher.assignments,
-      individualCourses: teacher.individualCourses?.map((ic) => ic.course) || [],
-      degreeCourses: teacher.degreeCourseTeachers?.map((d) => d.course) || [],
+      assignments: teacher.academicAssignments,
+      individualCourses: teacher.individualCourseAssignments.map((a) => a.individualCourse),
+      degreeCourses: teacher.degreeCourseAssignments.map((a) => a.degreeCourse),
       stats: {
         classesCount: sectionIds.length,
-        subjectsCount: teacher.assignments.length,
+        subjectsCount: teacher.academicAssignments.length,
         studentCount,
-        individualCoursesCount: icCount,
-        degreeCoursesCount: degreeCount,
+        individualCoursesCount: teacher.individualCourseAssignments.length,
+        degreeCoursesCount: teacher.degreeCourseAssignments.length,
       },
       upcomingExams,
     });
@@ -86,14 +79,17 @@ router.get('/classes', async (req, res, next) => {
   try {
     const teacher = await getTeacher(req);
     const sectionsMap = new Map();
-    for (const a of teacher.assignments) {
-      if (!sectionsMap.has(a.sectionId)) {
-        sectionsMap.set(a.sectionId, {
-          section: a.section,
-          subjects: [],
-        });
+    for (const c of teacher.expandedClasses) {
+      if (!sectionsMap.has(c.sectionId)) {
+        sectionsMap.set(c.sectionId, { section: c.section, subjects: [] });
       }
-      sectionsMap.get(a.sectionId).subjects.push(a.subject);
+      sectionsMap.get(c.sectionId).subjects.push(c.subjectId);
+    }
+    const subjectIds = [...new Set(teacher.expandedClasses.map((c) => c.subjectId))];
+    const subjects = await prisma.subject.findMany({ where: { id: { in: subjectIds } } });
+    const subjectById = new Map(subjects.map((s) => [s.id, s]));
+    for (const entry of sectionsMap.values()) {
+      entry.subjects = entry.subjects.map((id) => subjectById.get(id)).filter(Boolean);
     }
     return success(res, [...sectionsMap.values()]);
   } catch (err) { next(err); }
@@ -102,7 +98,7 @@ router.get('/classes', async (req, res, next) => {
 router.get('/students', async (req, res, next) => {
   try {
     const teacher = await getTeacher(req);
-    const sectionIds = [...new Set(teacher.assignments.map((a) => a.sectionId))];
+    const sectionIds = [...new Set(teacher.expandedClasses.map((c) => c.sectionId))];
     const students = await prisma.student.findMany({
       where: { instituteId: req.user.instituteId, currentSectionId: { in: sectionIds }, status: 'ACTIVE' },
       include: { currentBatch: true, currentSection: true },
@@ -116,34 +112,13 @@ router.post('/attendance/mark', async (req, res, next) => {
   try {
     const teacher = await getTeacher(req);
     const { date, subjectId, sectionId, records } = req.body;
-    const allowed = teacher.assignments.some((a) => a.subjectId === subjectId && a.sectionId === sectionId);
+    const allowed = teacher.expandedClasses.some((c) => c.subjectId === subjectId && c.sectionId === sectionId);
     if (!allowed) throw new AppError('Not assigned to this class/subject', 403);
 
-    const saved = [];
-    for (const rec of records || []) {
-      const attendance = await prisma.attendance.upsert({
-        where: {
-          instituteId_studentId_subjectId_date_lectureNumber: {
-            instituteId: req.user.instituteId,
-            studentId: rec.studentId,
-            subjectId,
-            date: new Date(date),
-            lectureNumber: rec.lectureNumber || 1,
-          },
-        },
-        create: {
-          instituteId: req.user.instituteId,
-          studentId: rec.studentId,
-          subjectId,
-          date: new Date(date),
-          lectureNumber: rec.lectureNumber || 1,
-          status: rec.status || 'PRESENT',
-          markedById: req.user.id,
-        },
-        update: { status: rec.status || 'PRESENT', markedById: req.user.id },
-      });
-      saved.push(attendance);
-    }
+    const saved = await markAttendance({
+      instituteId: req.user.instituteId, track: 'ACADEMIC',
+      date, subjectId, sectionId, records: records || [], markedById: req.user.id,
+    });
     return success(res, saved, `Attendance marked for ${saved.length} students`);
   } catch (err) { next(err); }
 });
@@ -151,10 +126,11 @@ router.post('/attendance/mark', async (req, res, next) => {
 router.get('/attendance', async (req, res, next) => {
   try {
     const teacher = await getTeacher(req);
-    const subjectIds = teacher.assignments.map((a) => a.subjectId);
+    const subjectIds = [...new Set(teacher.expandedClasses.map((c) => c.subjectId))];
     const records = await prisma.attendance.findMany({
       where: {
         instituteId: req.user.instituteId,
+        track: 'ACADEMIC',
         subjectId: { in: subjectIds },
         ...(req.query.date && { date: new Date(req.query.date) }),
       },
@@ -173,13 +149,12 @@ router.post('/marks', async (req, res, next) => {
   try {
     const teacher = await getTeacher(req);
     const { examId, subjectId, sectionId, entries } = req.body;
-    const allowed = teacher.assignments.some((a) => a.subjectId === subjectId && a.sectionId === sectionId);
+    const allowed = teacher.expandedClasses.some((c) => c.subjectId === subjectId && c.sectionId === sectionId);
     if (!allowed) throw new AppError('Not assigned to this class/subject', 403);
 
     const exam = await prisma.exam.findFirst({ where: { id: examId, instituteId: req.user.instituteId } });
     if (!exam) throw new AppError('Exam not found', 404);
 
-    const { computeResult } = await import('../../../utils/grading.js');
     const saved = [];
     for (const entry of entries || []) {
       const computed = computeResult({
@@ -202,6 +177,7 @@ router.post('/marks', async (req, res, next) => {
         },
         create: {
           instituteId: req.user.instituteId,
+          track: 'ACADEMIC',
           studentId: entry.studentId,
           subjectId,
           examId,
@@ -234,7 +210,7 @@ router.post('/marks', async (req, res, next) => {
 router.get('/exams', async (req, res, next) => {
   try {
     const teacher = await getTeacher(req);
-    const sectionIds = [...new Set(teacher.assignments.map((a) => a.sectionId))];
+    const sectionIds = [...new Set(teacher.expandedClasses.map((c) => c.sectionId))];
     const exams = await prisma.exam.findMany({
       where: { instituteId: req.user.instituteId, sectionId: { in: sectionIds } },
       include: { section: { include: { batch: true } } },
@@ -247,7 +223,7 @@ router.get('/exams', async (req, res, next) => {
 router.get('/timetable', async (req, res, next) => {
   try {
     const teacher = await getTeacher(req);
-    const sectionIds = [...new Set(teacher.assignments.map((a) => a.sectionId))];
+    const sectionIds = [...new Set(teacher.expandedClasses.map((c) => c.sectionId))];
     const timetable = await prisma.timetable.findMany({
       where: {
         instituteId: req.user.instituteId,
@@ -256,7 +232,12 @@ router.get('/timetable', async (req, res, next) => {
           { sectionId: { in: sectionIds } },
         ],
       },
-      include: { subject: true, section: { include: { batch: true } } },
+      include: {
+        subject: true,
+        section: { include: { batch: true } },
+        degreeCourse: { include: { semester: true } },
+        individualCourse: true,
+      },
       orderBy: [{ dayOfWeek: 'asc' }],
     });
     return success(res, timetable);
@@ -310,7 +291,30 @@ router.post('/tickets', async (req, res, next) => {
         escalatedToSuperAdmin: false,
       },
     });
+
+    const { events } = await import('../../../events/eventBus.js');
+    await events.ticketCreated({
+      aggregateId: ticket.id,
+      instituteId: req.user.instituteId,
+      payload: {
+        subject, priority: priority || 'MEDIUM',
+        createdByName: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+        actorId: req.user.id,
+      },
+    }).catch(() => {});
+
     return success(res, ticket, 'Ticket submitted to your institute', 201);
+  } catch (err) { next(err); }
+});
+
+router.get('/announcements', async (req, res, next) => {
+  try {
+    const items = await prisma.announcement.findMany({
+      where: { instituteId: req.user.instituteId },
+      orderBy: { publishedAt: 'desc' },
+      take: 20,
+    });
+    return success(res, items);
   } catch (err) { next(err); }
 });
 
@@ -384,7 +388,7 @@ router.get('/degree-courses/:courseId/students', async (req, res, next) => {
   try {
     const teacher = await getTeacher(req);
     const courseId = req.params.courseId;
-    const allowed = teacher.degreeCourseTeachers?.some((d) => d.courseId === courseId);
+    const allowed = teacher.degreeCourseAssignments.some((a) => a.degreeCourseId === courseId);
     if (!allowed) throw new AppError('Not assigned to this degree course', 403);
 
     const course = await prisma.degreeSemesterCourse.findFirst({
@@ -409,35 +413,14 @@ router.post('/individual-courses/:courseId/attendance/mark', async (req, res, ne
   try {
     const teacher = await getTeacher(req);
     const courseId = req.params.courseId;
-    const allowed = teacher.individualCourses?.some((ic) => ic.courseId === courseId);
+    const allowed = teacher.individualCourseAssignments.some((a) => a.individualCourseId === courseId);
     if (!allowed) throw new AppError('Not assigned to this individual course', 403);
 
     const { date, records } = req.body;
-    const saved = [];
-    for (const rec of records || []) {
-      const row = await prisma.individualCourseAttendance.upsert({
-        where: {
-          instituteId_courseId_studentId_date_lectureNumber: {
-            instituteId: req.user.instituteId,
-            courseId,
-            studentId: rec.studentId,
-            date: new Date(date),
-            lectureNumber: rec.lectureNumber || 1,
-          },
-        },
-        create: {
-          instituteId: req.user.instituteId,
-          courseId,
-          studentId: rec.studentId,
-          date: new Date(date),
-          lectureNumber: rec.lectureNumber || 1,
-          status: rec.status || 'PRESENT',
-          markedById: req.user.id,
-        },
-        update: { status: rec.status || 'PRESENT', markedById: req.user.id },
-      });
-      saved.push(row);
-    }
+    const saved = await markAttendance({
+      instituteId: req.user.instituteId, track: 'INDIVIDUAL_COURSE',
+      date, individualCourseId: courseId, records: records || [], markedById: req.user.id,
+    });
     return success(res, saved, `Attendance marked for ${saved.length} students`);
   } catch (err) { next(err); }
 });
@@ -446,53 +429,14 @@ router.post('/degree-courses/:courseId/attendance/mark', async (req, res, next) 
   try {
     const teacher = await getTeacher(req);
     const courseId = req.params.courseId;
-    const allowed = teacher.degreeCourseTeachers?.some((d) => d.courseId === courseId);
+    const allowed = teacher.degreeCourseAssignments.some((a) => a.degreeCourseId === courseId);
     if (!allowed) throw new AppError('Not assigned to this degree course', 403);
 
-    const course = await prisma.degreeSemesterCourse.findFirst({
-      where: { id: courseId, instituteId: req.user.instituteId },
-      include: { semester: true },
-    });
-    if (!course) throw new AppError('Course not found', 404);
-
     const { date, records } = req.body;
-    const enrolled = await prisma.degreeStudent.findMany({
-      where: {
-        batchId: course.semester.batchId,
-        currentSemesterNumber: course.semester.number,
-        status: 'ACTIVE',
-      },
+    const saved = await markAttendance({
+      instituteId: req.user.instituteId, track: 'DEGREE',
+      date, degreeCourseId: courseId, records: records || [], markedById: req.user.id,
     });
-    const byStudent = new Map(enrolled.map((e) => [e.studentId, e.id]));
-    const saved = [];
-
-    for (const rec of records || []) {
-      const degreeStudentId = byStudent.get(rec.studentId);
-      if (!degreeStudentId) continue;
-      const row = await prisma.degreeAttendance.upsert({
-        where: {
-          instituteId_courseId_studentId_date_lectureNumber: {
-            instituteId: req.user.instituteId,
-            courseId,
-            studentId: rec.studentId,
-            date: new Date(date),
-            lectureNumber: rec.lectureNumber || 1,
-          },
-        },
-        create: {
-          instituteId: req.user.instituteId,
-          courseId,
-          degreeStudentId,
-          studentId: rec.studentId,
-          date: new Date(date),
-          lectureNumber: rec.lectureNumber || 1,
-          status: rec.status || 'PRESENT',
-          markedById: req.user.id,
-        },
-        update: { status: rec.status || 'PRESENT', markedById: req.user.id },
-      });
-      saved.push(row);
-    }
     return success(res, saved, `Attendance marked for ${saved.length} students`);
   } catch (err) { next(err); }
 });

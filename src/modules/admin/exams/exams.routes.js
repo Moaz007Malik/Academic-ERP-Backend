@@ -5,6 +5,8 @@ import { requireModule } from '../../../middleware/moduleGuard.js';
 import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { AppError } from '../../../utils/AppError.js';
+import { getExamAnalytics, publishResults } from '../../../services/result.service.js';
+import { requirePermission } from '../../../middleware/rbac.js';
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.RESULTS_EXAMS));
@@ -31,114 +33,28 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id/analytics', async (req, res, next) => {
   try {
-    const exam = await prisma.exam.findFirst({
-      where: { id: req.params.id, instituteId: req.user.instituteId },
-      include: { section: { include: { batch: { include: { session: true } } } }, semester: true },
-    });
-    if (!exam) throw new AppError('Exam not found', 404);
-
-    const results = await prisma.result.findMany({
-      where: { examId: exam.id, instituteId: req.user.instituteId },
-      include: { student: true, subject: true },
-    });
-
-    const byStudent = {};
-    for (const r of results) {
-      if (!byStudent[r.studentId]) {
-        byStudent[r.studentId] = {
-          student: r.student,
-          subjects: [],
-          totalObtained: 0,
-          totalMax: 0,
-        };
-      }
-      const obtained = Number(r.totalMarks || 0);
-      const max = Number(r.maxMarks || 0);
-      byStudent[r.studentId].subjects.push({
-        subject: r.subject?.name,
-        obtained,
-        max,
-        grade: r.grade,
-        position: r.position,
-        isPassed: r.isPassed,
-      });
-      byStudent[r.studentId].totalObtained += obtained;
-      byStudent[r.studentId].totalMax += max;
-    }
-
-    const studentResults = Object.values(byStudent).map((s) => ({
-      ...s,
-      percentage: s.totalMax ? Math.round((s.totalObtained / s.totalMax) * 100) : 0,
-    })).sort((a, b) => b.totalObtained - a.totalObtained);
-
-    studentResults.forEach((s, i) => { s.rank = i + 1; });
-
-    const marks = studentResults.map((s) => s.totalObtained).filter(Boolean);
-    const stats = {
-      totalStudents: studentResults.length,
-      passed: studentResults.filter((s) => s.percentage >= (exam.passPercentage || 33)).length,
-      failed: studentResults.filter((s) => s.percentage < (exam.passPercentage || 33)).length,
-      highest: marks.length ? Math.max(...marks) : 0,
-      lowest: marks.length ? Math.min(...marks) : 0,
-      average: marks.length ? Math.round(marks.reduce((a, b) => a + b, 0) / marks.length) : 0,
-    };
-
-    return success(res, { exam, studentResults, stats });
+    const analytics = await getExamAnalytics({ instituteId: req.user.instituteId, examId: req.params.id });
+    return success(res, analytics);
   } catch (err) { next(err); }
 });
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const exam = await prisma.exam.findFirst({
-      where: { id: req.params.id, instituteId: req.user.instituteId },
-      include: { section: { include: { batch: { include: { session: true } } } }, semester: true },
-    });
-    if (!exam) throw new AppError('Exam not found', 404);
-
     if (req.query.include !== 'analytics') {
+      const exam = await prisma.exam.findFirst({
+        where: { id: req.params.id, instituteId: req.user.instituteId },
+        include: { section: { include: { batch: { include: { session: true } } } }, semester: true },
+      });
+      if (!exam) throw new AppError('Exam not found', 404);
       return success(res, exam);
     }
 
-    const results = await prisma.result.findMany({
-      where: { examId: exam.id, instituteId: req.user.instituteId },
-      include: { student: true, subject: true },
-    });
-
-    const byStudent = {};
-    for (const r of results) {
-      if (!byStudent[r.studentId]) {
-        byStudent[r.studentId] = { student: r.student, subjects: [], totalObtained: 0, totalMax: 0 };
-      }
-      const obtained = Number(r.totalMarks || 0);
-      const max = Number(r.maxMarks || 0);
-      byStudent[r.studentId].subjects.push({
-        subject: r.subject?.name, obtained, max, grade: r.grade, position: r.position, isPassed: r.isPassed,
-      });
-      byStudent[r.studentId].totalObtained += obtained;
-      byStudent[r.studentId].totalMax += max;
-    }
-
-    const studentResults = Object.values(byStudent).map((s) => ({
-      ...s,
-      percentage: s.totalMax ? Math.round((s.totalObtained / s.totalMax) * 100) : 0,
-    })).sort((a, b) => b.totalObtained - a.totalObtained);
-    studentResults.forEach((s, i) => { s.rank = i + 1; });
-
-    const marks = studentResults.map((s) => s.totalObtained).filter(Boolean);
-    const stats = {
-      totalStudents: studentResults.length,
-      passed: studentResults.filter((s) => s.percentage >= (exam.passPercentage || 33)).length,
-      failed: studentResults.filter((s) => s.percentage < (exam.passPercentage || 33)).length,
-      highest: marks.length ? Math.max(...marks) : 0,
-      lowest: marks.length ? Math.min(...marks) : 0,
-      average: marks.length ? Math.round(marks.reduce((a, b) => a + b, 0) / marks.length) : 0,
-    };
-
-    return success(res, { exam, studentResults, stats });
+    const analytics = await getExamAnalytics({ instituteId: req.user.instituteId, examId: req.params.id });
+    return success(res, analytics);
   } catch (err) { next(err); }
 });
 
-router.post('/', async (req, res, next) => {
+router.post('/', requirePermission('MANAGE_EXAMS'), async (req, res, next) => {
   try {
     const {
       name, examType, sectionId, semesterId, startDate, endDate,
@@ -175,7 +91,7 @@ router.post('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.put('/:id', async (req, res, next) => {
+router.put('/:id', requirePermission('MANAGE_EXAMS'), async (req, res, next) => {
   try {
     const existing = await prisma.exam.findFirst({
       where: { id: req.params.id, instituteId: req.user.instituteId },
@@ -202,25 +118,28 @@ router.put('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post('/:id/publish', async (req, res, next) => {
+router.post('/:id/publish', requirePermission('PUBLISH_RESULTS'), async (req, res, next) => {
   try {
     const exam = await prisma.exam.findFirst({
       where: { id: req.params.id, instituteId: req.user.instituteId },
     });
     if (!exam) throw new AppError('Exam not found', 404);
 
-    await prisma.$transaction([
-      prisma.exam.update({ where: { id: exam.id }, data: { isPublished: true } }),
-      prisma.result.updateMany({
-        where: { examId: exam.id, instituteId: req.user.instituteId },
-        data: { publishedAt: new Date() },
-      }),
-    ]);
+    await prisma.exam.update({ where: { id: exam.id }, data: { isPublished: true } });
+    await publishResults({ instituteId: req.user.instituteId, track: 'ACADEMIC', examId: exam.id });
+
+    const { events } = await import('../../../events/eventBus.js');
+    await events.resultPublished({
+      aggregateId: exam.id,
+      instituteId: req.user.instituteId,
+      payload: { examId: exam.id, scopeLabel: exam.name, track: 'ACADEMIC', actorId: req.user.id },
+    });
+
     return success(res, { isPublished: true }, 'Results published');
   } catch (err) { next(err); }
 });
 
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', requirePermission('MANAGE_EXAMS'), async (req, res, next) => {
   try {
     const exam = await prisma.exam.findFirst({
       where: { id: req.params.id, instituteId: req.user.instituteId },

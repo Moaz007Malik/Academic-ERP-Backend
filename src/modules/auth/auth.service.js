@@ -1,7 +1,9 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../config/database.js';
+import { env } from '../../config/env.js';
 import { AppError } from '../../utils/AppError.js';
 import { getPortalRouteForRole } from '../../utils/constants.js';
+import { PERMISSIONS } from '../../utils/permissions.js';
 import { assertLoginAccess, isSubscriptionExpired } from '../../utils/instituteAccess.js';
 import {
   signAccessToken,
@@ -17,9 +19,9 @@ import {
 import { isRedisReady } from '../../config/redis.js';
 import { writeAuditLog } from '../../services/audit.service.js';
 import { publishEvent } from '../../events/eventBus.js';
+import { setOtp, getOtp, clearOtp } from '../../services/otpStore.service.js';
 
 const BCRYPT_ROUNDS = 12;
-const OTP_PREFIX = 'otp:';
 
 export async function login({ email, password }, ip, userAgent) {
   const { isAccountLocked, recordLoginAttempt, assertIpWhitelist, detectSuspiciousLogin, createUserSession } =
@@ -128,6 +130,7 @@ export async function login({ email, password }, ip, userAgent) {
       instituteId: user.instituteId,
       mustChangePass: user.mustChangePass,
       modules: user.institute?.activeModules ?? [],
+      permissions: PERMISSIONS[user.role] ?? [],
       instituteName: user.institute?.name ?? null,
       instituteLogo: user.institute?.logo ?? null,
       instituteStatus,
@@ -205,6 +208,7 @@ export async function getMe(userId) {
     instituteId: user.instituteId,
     mustChangePass: user.mustChangePass,
     modules: user.institute?.activeModules ?? [],
+    permissions: PERMISSIONS[user.role] ?? [],
     instituteStatus: user.institute
       ? (expired && user.institute.status === 'ACTIVE' ? 'EXPIRED' : user.institute.status)
       : null,
@@ -262,13 +266,10 @@ export async function forgotPassword(email) {
   if (!user) return { message: 'If the email exists, an OTP has been sent' };
 
   const otp = String(Math.floor(100000 + Math.random() * 900000));
+  await setOtp(email, otp);
 
-  if (isRedisReady()) {
-    const { getRedis } = await import('../../config/redis.js');
-    const redis = getRedis();
-    await redis.setex(`${OTP_PREFIX}${email.toLowerCase()}`, 900, otp);
-  } else if (process.env.NODE_ENV === 'development') {
-    console.log(`OTP for ${email}: ${otp} (Redis disabled — OTP not persisted)`);
+  if (!isRedisReady() && env.nodeEnv === 'development') {
+    console.log(`OTP for ${email}: ${otp} (Redis disabled — using in-process fallback store)`);
     return { message: 'If the email exists, an OTP has been sent', devOtp: otp };
   }
 
@@ -276,13 +277,7 @@ export async function forgotPassword(email) {
 }
 
 export async function resetPassword(email, otp, newPassword) {
-  let stored = null;
-  if (isRedisReady()) {
-    const { getRedis } = await import('../../config/redis.js');
-    const redis = getRedis();
-    stored = await redis.get(`${OTP_PREFIX}${email.toLowerCase()}`);
-  }
-
+  const stored = await getOtp(email);
   if (!stored || stored !== otp) {
     throw new AppError('Invalid or expired OTP', 400);
   }
@@ -296,10 +291,7 @@ export async function resetPassword(email, otp, newPassword) {
     data: { passwordHash, mustChangePass: false },
   });
 
-  if (isRedisReady()) {
-    const { getRedis } = await import('../../config/redis.js');
-    await getRedis().del(`${OTP_PREFIX}${email.toLowerCase()}`);
-  }
+  await clearOtp(email);
   await revokeAllUserTokens(user.id);
 }
 

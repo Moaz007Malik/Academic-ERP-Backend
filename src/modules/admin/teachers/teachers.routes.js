@@ -7,6 +7,8 @@ import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { createPortalUser, generateEmployeeCode } from '../../../utils/portalUser.js';
 import { getTeacherProfile } from '../../../services/profile.service.js';
+import { assignTeacher, removeAssignment } from '../../../services/teacherAssignment.service.js';
+import { requirePermission } from '../../../middleware/rbac.js';
 import { AppError } from '../../../utils/AppError.js';
 
 const router = Router();
@@ -34,7 +36,7 @@ router.get('/', async (req, res, next) => {
         orderBy: { createdAt: 'desc' },
         include: {
           user: { select: { email: true, portalPassword: true } },
-          assignments: { include: { subject: true, section: { include: { batch: true } } } },
+          assignments: { include: { subject: true, academicClass: true, section: { include: { batch: true } } } },
         },
       }),
       prisma.teacher.count({ where }),
@@ -65,7 +67,7 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post('/', async (req, res, next) => {
+router.post('/', requirePermission('MANAGE_TEACHER_PROFILES'), async (req, res, next) => {
   try {
     const {
       firstName, lastName, email, password, employeeCode,
@@ -113,7 +115,7 @@ router.post('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.put('/:id', async (req, res, next) => {
+router.put('/:id', requirePermission('MANAGE_TEACHER_PROFILES'), async (req, res, next) => {
   try {
     const existing = await prisma.teacher.findFirst({
       where: { id: req.params.id, instituteId: req.user.instituteId },
@@ -141,13 +143,13 @@ router.put('/:id', async (req, res, next) => {
         ...(salary !== undefined && { salary }),
         ...(status !== undefined && { status }),
       },
-      include: { assignments: { include: { subject: true, section: true } } },
+      include: { assignments: { include: { subject: true, academicClass: true, section: true } } },
     });
     return success(res, teacher, 'Teacher updated');
   } catch (err) { next(err); }
 });
 
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', requirePermission('MANAGE_TEACHER_PROFILES'), async (req, res, next) => {
   try {
     const teacher = await prisma.teacher.findFirst({
       where: { id: req.params.id, instituteId: req.user.instituteId },
@@ -167,39 +169,25 @@ router.delete('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post('/:id/assignments', async (req, res, next) => {
+router.post('/:id/assignments', requirePermission('MANAGE_TEACHER_ASSIGNMENTS'), async (req, res, next) => {
   try {
-    const { subjectId, sectionId } = req.body;
-    if (!subjectId || !sectionId) throw new AppError('Subject and section are required', 400);
+    const { subjectId, scope, classId, sectionId } = req.body;
+    if (!subjectId) throw new AppError('Subject is required', 400);
+    const effectiveScope = scope || (classId ? 'CLASS' : 'SECTION');
+    if (effectiveScope === 'CLASS' && !classId) throw new AppError('Class is required for a class-wide assignment', 400);
+    if (effectiveScope === 'SECTION' && !sectionId) throw new AppError('Section is required for a section-only assignment', 400);
 
-    const teacher = await prisma.teacher.findFirst({
-      where: { id: req.params.id, instituteId: req.user.instituteId },
-    });
-    if (!teacher) throw new AppError('Teacher not found', 404);
-
-    const assignment = await prisma.teacherAssignment.create({
-      data: {
-        instituteId: req.user.instituteId,
-        teacherId: teacher.id,
-        subjectId,
-        sectionId,
-      },
-      include: { subject: true, section: { include: { batch: true } } },
+    const assignment = await assignTeacher({
+      instituteId: req.user.instituteId, track: 'ACADEMIC', teacherId: req.params.id,
+      subjectId, scope: effectiveScope, classId, sectionId,
     });
     return success(res, assignment, 'Assignment created', 201);
-  } catch (err) {
-    if (err.code === 'P2002') return next(new AppError('Teacher already assigned to this subject/section', 409));
-    next(err);
-  }
+  } catch (err) { next(err); }
 });
 
-router.delete('/assignments/:assignmentId', async (req, res, next) => {
+router.delete('/assignments/:assignmentId', requirePermission('MANAGE_TEACHER_ASSIGNMENTS'), async (req, res, next) => {
   try {
-    const assignment = await prisma.teacherAssignment.findFirst({
-      where: { id: req.params.assignmentId, instituteId: req.user.instituteId },
-    });
-    if (!assignment) throw new AppError('Assignment not found', 404);
-    await prisma.teacherAssignment.delete({ where: { id: assignment.id } });
+    await removeAssignment({ instituteId: req.user.instituteId, assignmentId: req.params.assignmentId });
     return success(res, null, 'Assignment removed');
   } catch (err) { next(err); }
 });

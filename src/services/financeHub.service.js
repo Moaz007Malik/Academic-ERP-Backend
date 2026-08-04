@@ -1,36 +1,8 @@
 import { prisma } from '../config/database.js';
 import { getEffectiveSemesterFee } from './degreeFee.service.js';
+import { summarizeFees } from './fee.service.js';
 
-export function summarizeFees(fees) {
-  let paid = 0;
-  let remaining = 0;
-  const installmentPlans = [];
-
-  for (const f of fees) {
-    const amt = Number(f.amount || 0) + Number(f.fine || 0) - Number(f.discount || 0);
-    if (f.status === 'PAID') paid += amt;
-    else remaining += amt;
-    if (f.installments?.length) {
-      installmentPlans.push({
-        parentFee: f,
-        installments: f.installments,
-        paidInstallments: f.installments.filter((i) => i.status === 'PAID').length,
-        remainingInstallments: f.installments.filter((i) => i.status !== 'PAID').length,
-        remainingBalance: f.installments
-          .filter((i) => i.status !== 'PAID')
-          .reduce((s, i) => s + Number(i.amount) - Number(i.discount || 0), 0),
-      });
-    }
-  }
-
-  return {
-    total: paid + remaining,
-    paid,
-    remaining,
-    installmentPlans,
-    paymentHistory: fees.filter((f) => f.status === 'PAID'),
-  };
-}
+export { summarizeFees };
 
 export async function getAcademicStudentFees(studentId, instituteId) {
   const student = await prisma.student.findFirst({
@@ -43,7 +15,7 @@ export async function getAcademicStudentFees(studentId, instituteId) {
   if (!student) return null;
 
   const fees = await prisma.fee.findMany({
-    where: { studentId, instituteId, degreeStudentId: null, individualCourseEnrollmentId: null },
+    where: { studentId, instituteId, track: 'ACADEMIC' },
     include: {
       feeStructure: true,
       installments: { orderBy: { installmentNo: 'asc' } },

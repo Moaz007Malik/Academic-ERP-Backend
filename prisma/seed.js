@@ -273,6 +273,7 @@ async function main() {
   await prisma.user.updateMany({ where: { role: 'TEACHER', portalPassword: null }, data: { portalPassword: 'Teacher@123' } });
 
   await seedGreenfieldAcademic(now, addDays);
+  await seedDegreeAndIndividualCourseTracks(now, addDays);
 }
 
 async function seedGreenfieldAcademic(now, addDays) {
@@ -400,8 +401,8 @@ async function seedGreenfieldAcademic(now, addDays) {
 
   await prisma.teacherAssignment.createMany({
     data: [
-      { instituteId: institute.id, teacherId: teacher.id, subjectId: subjects[0].id, sectionId: section.id },
-      { instituteId: institute.id, teacherId: teacher.id, subjectId: subjects[1].id, sectionId: section.id },
+      { instituteId: institute.id, track: 'ACADEMIC', scope: 'SECTION', teacherId: teacher.id, subjectId: subjects[0].id, sectionId: section.id },
+      { instituteId: institute.id, track: 'ACADEMIC', scope: 'SECTION', teacherId: teacher.id, subjectId: subjects[1].id, sectionId: section.id },
     ],
   });
 
@@ -544,6 +545,94 @@ async function seedGreenfieldAcademic(now, addDays) {
 
   console.log('  GCU-LHR seeded: Teacher imran.qureshi@greenfield.edu.pk / Teacher@123');
   console.log('  GCU-LHR seeded: Students ali.raza@... / Student@123');
+}
+
+async function seedDegreeAndIndividualCourseTracks(now, addDays) {
+  const institute = await prisma.institute.findUnique({ where: { instituteCode: 'GCU-LHR' } });
+  if (!institute) return;
+
+  const existing = await prisma.degree.findFirst({ where: { instituteId: institute.id } });
+  if (existing) {
+    console.log('  GCU-LHR Degree/Individual Course seed data exists — skipping');
+    return;
+  }
+
+  const teacher = await prisma.teacher.findFirst({ where: { instituteId: institute.id, employeeCode: 'T-001' } });
+  const anchorStudent = await prisma.student.findFirst({ where: { instituteId: institute.id, rollNumber: '2024-001' } });
+  if (!teacher || !anchorStudent) return;
+
+  console.log('  Seeding GCU-LHR Degree Program + Individual Course tracks...');
+
+  const degree = await prisma.degree.create({
+    data: { instituteId: institute.id, name: 'BS Computer Science', code: 'BSCS', description: 'Four-year undergraduate program', status: 'ACTIVE' },
+  });
+  const degreeBatch = await prisma.degreeBatch.create({
+    data: { instituteId: institute.id, degreeId: degree.id, name: 'Fall 2024', totalSemesters: 8, registrationFee: 20000, defaultSemesterFee: 60000, currentSemester: 1 },
+  });
+  const [semester1] = await Promise.all(
+    [1, 2].map((number) => prisma.degreeSemester.create({
+      data: { instituteId: institute.id, batchId: degreeBatch.id, number, name: `Semester ${number}` },
+    })),
+  );
+  const degreeCourse = await prisma.degreeSemesterCourse.create({
+    data: { instituteId: institute.id, semesterId: semester1.id, name: 'Database Systems', code: 'CS-201', creditHours: 3 },
+  });
+  const degreeStudent = await prisma.degreeStudent.create({
+    data: {
+      instituteId: institute.id, batchId: degreeBatch.id, studentId: anchorStudent.id,
+      currentSemesterNumber: 1, registrationFee: 20000, semesterFee: 60000, netSemesterFee: 60000,
+    },
+  });
+  await prisma.teacherAssignment.create({
+    data: { instituteId: institute.id, track: 'DEGREE', teacherId: teacher.id, degreeCourseId: degreeCourse.id },
+  });
+  await prisma.attendance.create({
+    data: {
+      instituteId: institute.id, track: 'DEGREE', studentId: anchorStudent.id, degreeStudentId: degreeStudent.id,
+      degreeCourseId: degreeCourse.id, date: addDays(-1), status: 'PRESENT',
+    },
+  });
+  await prisma.result.create({
+    data: {
+      instituteId: institute.id, track: 'DEGREE', studentId: anchorStudent.id, degreeStudentId: degreeStudent.id,
+      semesterId: semester1.id, degreeCourseId: degreeCourse.id,
+      theoryMarks: 70, practicalMarks: 0, internalMarks: 10, totalMarks: 80, maxMarks: 100,
+      grade: 'A', gradePoints: 3.7, percentage: 80, passPercentage: 33, isPassed: true, publishedAt: now,
+    },
+  });
+  await prisma.timetable.create({
+    data: {
+      instituteId: institute.id, track: 'DEGREE', degreeCourseId: degreeCourse.id, teacherId: teacher.id,
+      dayOfWeek: 4, startTime: '11:00', endTime: '12:30', room: 'CS-Lab-1',
+    },
+  });
+
+  const individualCourse = await prisma.individualCourse.create({
+    data: {
+      instituteId: institute.id, name: 'Spoken English', code: 'IC-ENG-01', duration: '3 months',
+      capacity: 30, status: 'ACTIVE', paymentType: 'ONE_TIME', oneTimeFee: 8000,
+    },
+  });
+  await prisma.individualCourseEnrollment.create({
+    data: { instituteId: institute.id, courseId: individualCourse.id, studentId: anchorStudent.id, status: 'ENROLLED', feeDue: 8000 },
+  });
+  await prisma.teacherAssignment.create({
+    data: { instituteId: institute.id, track: 'INDIVIDUAL_COURSE', teacherId: teacher.id, individualCourseId: individualCourse.id },
+  });
+  await prisma.attendance.create({
+    data: {
+      instituteId: institute.id, track: 'INDIVIDUAL_COURSE', studentId: anchorStudent.id,
+      individualCourseId: individualCourse.id, date: addDays(-1), status: 'PRESENT',
+    },
+  });
+  await prisma.timetable.create({
+    data: {
+      instituteId: institute.id, track: 'INDIVIDUAL_COURSE', individualCourseId: individualCourse.id, teacherId: teacher.id,
+      dayOfWeek: 6, startTime: '16:00', endTime: '17:00', room: 'Room-3',
+    },
+  });
+
+  console.log('  GCU-LHR seeded: Degree (BSCS) + Individual Course (Spoken English) tracks');
 }
 
 main()

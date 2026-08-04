@@ -8,6 +8,14 @@ import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.
 import { createPortalUser, generateRollNumber } from '../../../utils/portalUser.js';
 import { AppError } from '../../../utils/AppError.js';
 import { assignIndividualCourseFees, calculateEnrollmentFeeDue } from '../../../services/individualCourseFee.service.js';
+import { assignTeacher } from '../../../services/teacherAssignment.service.js';
+import { markAttendance, getAttendanceRecords } from '../../../services/attendance.service.js';
+
+function withTeachersAlias(course) {
+  if (!course) return course;
+  const { teacherAssignments, ...rest } = course;
+  return { ...rest, teachers: teacherAssignments };
+}
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.INDIVIDUAL_COURSES));
@@ -31,13 +39,13 @@ router.get('/', async (req, res, next) => {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          teachers: { include: { teacher: { select: { id: true, firstName: true, lastName: true } } } },
+          teacherAssignments: { include: { teacher: { select: { id: true, firstName: true, lastName: true } } } },
           _count: { select: { enrollments: true } },
         },
       }),
       prisma.individualCourse.count({ where }),
     ]);
-    return paginated(res, courses, buildPaginationMeta(total, page, limit));
+    return paginated(res, courses.map(withTeachersAlias), buildPaginationMeta(total, page, limit));
   } catch (err) { next(err); }
 });
 
@@ -46,7 +54,7 @@ router.get('/:id', async (req, res, next) => {
     const course = await prisma.individualCourse.findFirst({
       where: { id: req.params.id, instituteId: req.user.instituteId },
       include: {
-        teachers: { include: { teacher: true } },
+        teacherAssignments: { include: { teacher: true } },
         enrollments: {
           include: { student: { select: { id: true, firstName: true, lastName: true, rollNumber: true } } },
           orderBy: { enrolledAt: 'desc' },
@@ -54,7 +62,7 @@ router.get('/:id', async (req, res, next) => {
       },
     });
     if (!course) throw new AppError('Course not found', 404);
-    return success(res, course);
+    return success(res, withTeachersAlias(course));
   } catch (err) { next(err); }
 });
 
@@ -109,8 +117,8 @@ router.post('/', async (req, res, next) => {
         },
       });
       if (teacherIdList.length) {
-        await tx.individualCourseTeacher.createMany({
-          data: teacherIdList.map((teacherId) => ({ courseId: c.id, teacherId })),
+        await tx.teacherAssignment.createMany({
+          data: teacherIdList.map((teacherId) => ({ instituteId, track: 'INDIVIDUAL_COURSE', teacherId, individualCourseId: c.id })),
           skipDuplicates: true,
         });
       }
@@ -150,11 +158,11 @@ router.put('/:id', async (req, res, next) => {
         },
       });
       if (teacherIds) {
-        await tx.individualCourseTeacher.deleteMany({ where: { courseId: req.params.id } });
+        await tx.teacherAssignment.deleteMany({ where: { track: 'INDIVIDUAL_COURSE', individualCourseId: req.params.id } });
         const teacherIdList = Array.isArray(teacherIds) ? teacherIds.filter(Boolean) : [];
         if (teacherIdList.length) {
-          await tx.individualCourseTeacher.createMany({
-            data: teacherIdList.map((teacherId) => ({ courseId: req.params.id, teacherId })),
+          await tx.teacherAssignment.createMany({
+            data: teacherIdList.map((teacherId) => ({ instituteId: req.user.instituteId, track: 'INDIVIDUAL_COURSE', teacherId, individualCourseId: req.params.id })),
             skipDuplicates: true,
           });
         }
@@ -262,20 +270,17 @@ router.post('/:id/teachers', async (req, res, next) => {
       where: { id: req.params.id, instituteId: req.user.instituteId },
     });
     if (!course) throw new AppError('Course not found', 404);
-    const link = await prisma.individualCourseTeacher.upsert({
-      where: { courseId_teacherId: { courseId: course.id, teacherId } },
-      create: { courseId: course.id, teacherId },
-      update: {},
-      include: { teacher: { select: { id: true, firstName: true, lastName: true } } },
+    const assignment = await assignTeacher({
+      instituteId: req.user.instituteId, track: 'INDIVIDUAL_COURSE', teacherId, individualCourseId: course.id,
     });
-    return success(res, link, 'Teacher assigned', 201);
+    return success(res, assignment, 'Teacher assigned', 201);
   } catch (err) { next(err); }
 });
 
 router.delete('/:id/teachers/:teacherId', async (req, res, next) => {
   try {
-    await prisma.individualCourseTeacher.deleteMany({
-      where: { courseId: req.params.id, teacherId: req.params.teacherId },
+    await prisma.teacherAssignment.deleteMany({
+      where: { instituteId: req.user.instituteId, track: 'INDIVIDUAL_COURSE', individualCourseId: req.params.id, teacherId: req.params.teacherId },
     });
     return success(res, null, 'Teacher removed');
   } catch (err) { next(err); }
@@ -283,17 +288,8 @@ router.delete('/:id/teachers/:teacherId', async (req, res, next) => {
 
 router.get('/:id/attendance', async (req, res, next) => {
   try {
-    const where = {
-      instituteId: req.user.instituteId,
-      courseId: req.params.id,
-      ...(req.query.date && { date: new Date(req.query.date) }),
-    };
-    const records = await prisma.individualCourseAttendance.findMany({
-      where,
-      include: {
-        student: { select: { id: true, firstName: true, lastName: true, rollNumber: true } },
-      },
-      orderBy: { date: 'desc' },
+    const records = await getAttendanceRecords({
+      instituteId: req.user.instituteId, track: 'INDIVIDUAL_COURSE', individualCourseId: req.params.id, date: req.query.date,
     });
     return success(res, records);
   } catch (err) { next(err); }
@@ -304,43 +300,10 @@ router.post('/:id/attendance/mark', async (req, res, next) => {
     const { date, records } = req.body;
     if (!date || !Array.isArray(records)) throw new AppError('date and records required', 400);
 
-    const course = await prisma.individualCourse.findFirst({
-      where: { id: req.params.id, instituteId: req.user.instituteId },
+    const saved = await markAttendance({
+      instituteId: req.user.instituteId, track: 'INDIVIDUAL_COURSE',
+      date, individualCourseId: req.params.id, records, markedById: req.user.id,
     });
-    if (!course) throw new AppError('Course not found', 404);
-
-    const enrolled = await prisma.individualCourseEnrollment.findMany({
-      where: { courseId: course.id, status: 'ENROLLED' },
-      select: { studentId: true },
-    });
-    const allowed = new Set(enrolled.map((e) => e.studentId));
-    const saved = [];
-
-    for (const rec of records) {
-      if (!allowed.has(rec.studentId)) continue;
-      const row = await prisma.individualCourseAttendance.upsert({
-        where: {
-          instituteId_courseId_studentId_date_lectureNumber: {
-            instituteId: req.user.instituteId,
-            courseId: course.id,
-            studentId: rec.studentId,
-            date: new Date(date),
-            lectureNumber: rec.lectureNumber || 1,
-          },
-        },
-        create: {
-          instituteId: req.user.instituteId,
-          courseId: course.id,
-          studentId: rec.studentId,
-          date: new Date(date),
-          lectureNumber: rec.lectureNumber || 1,
-          status: rec.status || 'PRESENT',
-          markedById: req.user.id,
-        },
-        update: { status: rec.status || 'PRESENT', markedById: req.user.id },
-      });
-      saved.push(row);
-    }
     return success(res, saved, `Attendance marked for ${saved.length} students`);
   } catch (err) { next(err); }
 });

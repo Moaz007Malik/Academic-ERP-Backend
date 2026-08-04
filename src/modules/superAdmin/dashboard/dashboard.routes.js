@@ -11,6 +11,7 @@ router.get('/', async (req, res, next) => {
       activeInstitutes,
       expiredInstitutes,
       suspendedInstitutes,
+      blockedInstitutes,
       pendingInvoices,
       openTickets,
     ] = await Promise.all([
@@ -18,6 +19,7 @@ router.get('/', async (req, res, next) => {
       prisma.institute.count({ where: { status: 'ACTIVE', deletedAt: null } }),
       prisma.institute.count({ where: { status: 'EXPIRED', deletedAt: null } }),
       prisma.institute.count({ where: { status: 'SUSPENDED', deletedAt: null } }),
+      prisma.institute.count({ where: { status: 'BLOCKED', deletedAt: null } }),
       prisma.subscriptionInvoice.count({ where: { status: 'PENDING' } }),
       prisma.supportTicket.count({ where: { status: 'OPEN' } }),
     ]);
@@ -39,6 +41,7 @@ router.get('/', async (req, res, next) => {
       expiringSoon,
       expiredInstitutes,
       suspendedInstitutes,
+      blockedInstitutes,
       pendingInvoices,
       openTickets,
       totalStudents: await prisma.student.count(),

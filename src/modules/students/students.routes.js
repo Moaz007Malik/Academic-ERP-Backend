@@ -217,6 +217,18 @@ router.post('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) =>
       ? { email: result.student.user.email, password: password || 'Student@123' }
       : null;
 
+    const { events } = await import('../../events/eventBus.js');
+    await events.studentCreated({
+      aggregateId: result.student.id,
+      instituteId,
+      payload: {
+        studentId: result.student.id,
+        studentName: `${result.student.firstName} ${result.student.lastName}`,
+        rollNumber: result.student.rollNumber,
+        actorId: req.user.id,
+      },
+    }).catch(() => {});
+
     return success(res, {
       student: result.student,
       portalCredentials: portalCreds,

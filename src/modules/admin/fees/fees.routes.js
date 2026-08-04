@@ -5,6 +5,7 @@ import { requireModule } from '../../../middleware/moduleGuard.js';
 import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { AppError } from '../../../utils/AppError.js';
+import { createInstallments } from '../../../services/fee.service.js';
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.FEES_FINANCE));
@@ -112,6 +113,7 @@ router.post('/assign', async (req, res, next) => {
     const fee = await prisma.fee.create({
       data: {
         instituteId: req.user.instituteId,
+        track: 'ACADEMIC',
         studentId,
         feeStructureId,
         amount: structure.amount,
@@ -171,6 +173,7 @@ router.post('/assign/bulk', async (req, res, next) => {
       const fee = await prisma.fee.create({
         data: {
           instituteId,
+          track: 'ACADEMIC',
           studentId,
           feeStructureId,
           amount: structure.amount,
@@ -248,31 +251,9 @@ router.post('/requests/:id/review', async (req, res, next) => {
         }
 
         if ((action === 'INSTALLMENT' || request.requestType === 'INSTALLMENT') && installmentCount > 1) {
-          const count = installmentCount || 2;
-          const netAmount = Number(fee.amount) - Number(fee.discount);
-          const perInstallment = Math.round((netAmount / count) * 100) / 100;
-          await tx.fee.update({
-            where: { id: fee.id },
-            data: { status: 'PARTIAL', notes: `Split into ${count} installments` },
+          await createInstallments(tx, {
+            instituteId, parentFee: fee, installmentCount, firstDueDate: fee.dueDate,
           });
-          const baseDue = fee.dueDate ? new Date(fee.dueDate) : new Date();
-          for (let i = 1; i <= count; i++) {
-            const due = new Date(baseDue);
-            due.setMonth(due.getMonth() + (i - 1));
-            await tx.fee.create({
-              data: {
-                instituteId,
-                studentId: fee.studentId,
-                feeStructureId: fee.feeStructureId,
-                amount: perInstallment,
-                dueDate: due,
-                status: 'PENDING',
-                parentFeeId: fee.id,
-                installmentNo: i,
-                assignmentScope: 'INDIVIDUAL',
-              },
-            });
-          }
         }
 
         if (approvedAmount != null && request.requestType === 'PARTIAL_PAYMENT') {
@@ -319,6 +300,19 @@ router.post('/:id/collect', async (req, res, next) => {
       include: { student: true, feeStructure: true },
     });
 
+    if (fee.track === 'INDIVIDUAL_COURSE' && fee.individualCourseEnrollmentId) {
+      const enrollment = await prisma.individualCourseEnrollment.findUnique({
+        where: { id: fee.individualCourseEnrollmentId }, select: { feeDue: true },
+      });
+      await prisma.individualCourseEnrollment.update({
+        where: { id: fee.individualCourseEnrollmentId },
+        data: {
+          feePaid: { increment: payable },
+          feeDue: Math.max(0, Number(enrollment.feeDue) - payable),
+        },
+      });
+    }
+
     const { events } = await import('../../../events/eventBus.js');
     await events.feeCollected({
       aggregateId: fee.id,
@@ -326,6 +320,8 @@ router.post('/:id/collect', async (req, res, next) => {
       payload: {
         feeId: fee.id,
         studentId: fee.studentId,
+        studentName: `${updated.student.firstName} ${updated.student.lastName}`,
+        feeName: updated.feeStructure?.name,
         amount: payable,
         originalAmount: Number(fee.amount),
         discount: Number(fee.discount || 0),

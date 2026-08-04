@@ -4,8 +4,10 @@ import { success } from '../../../utils/response.js';
 import { requireModule } from '../../../middleware/moduleGuard.js';
 import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
-import { computeResult, calculateCGPA } from '../../../utils/grading.js';
+import { calculateCGPA } from '../../../utils/grading.js';
 import { AppError } from '../../../utils/AppError.js';
+import { enterResult, bulkEnterResults, getStudentResults } from '../../../services/result.service.js';
+import { requirePermission } from '../../../middleware/rbac.js';
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.RESULTS_EXAMS));
@@ -20,7 +22,7 @@ router.get('/exam/:examId', async (req, res, next) => {
     if (!exam) throw new AppError('Exam not found', 404);
 
     const results = await prisma.result.findMany({
-      where: { examId: exam.id, instituteId: req.user.instituteId },
+      where: { examId: exam.id, instituteId: req.user.instituteId, track: 'ACADEMIC' },
       include: {
         student: { select: { id: true, firstName: true, lastName: true, rollNumber: true } },
         subject: { select: { id: true, name: true, code: true } },
@@ -33,24 +35,15 @@ router.get('/exam/:examId', async (req, res, next) => {
 
 router.get('/student/:studentId', async (req, res, next) => {
   try {
-    const results = await prisma.result.findMany({
-      where: {
-        studentId: req.params.studentId,
-        instituteId: req.user.instituteId,
-        publishedAt: { not: null },
-      },
-      include: {
-        exam: true,
-        subject: true,
-      },
-      orderBy: { createdAt: 'desc' },
+    const results = await getStudentResults({
+      instituteId: req.user.instituteId, studentId: req.params.studentId, track: 'ACADEMIC', publishedOnly: true,
     });
     const cgpa = calculateCGPA(results);
     return success(res, { results, cgpa });
   } catch (err) { next(err); }
 });
 
-router.post('/entry', async (req, res, next) => {
+router.post('/entry', requirePermission('ENTER_MARKS'), async (req, res, next) => {
   try {
     const { examId, subjectId, studentId, theoryMarks, practicalMarks, internalMarks } = req.body;
     if (!examId || !subjectId || !studentId) {
@@ -62,58 +55,20 @@ router.post('/entry', async (req, res, next) => {
     });
     if (!exam) throw new AppError('Exam not found', 404);
 
-    const computed = computeResult({
+    const result = await enterResult({
+      instituteId: req.user.instituteId, track: 'ACADEMIC', studentId, examId, subjectId,
       theoryMarks, practicalMarks, internalMarks,
-      theoryMax: Number(exam.theoryMax),
-      practicalMax: Number(exam.practicalMax),
-      internalMax: Number(exam.internalMax),
-      passPercentage: Number(exam.passPercentage),
-    });
-
-    const result = await prisma.result.upsert({
-      where: {
-        instituteId_studentId_subjectId_examId: {
-          instituteId: req.user.instituteId,
-          studentId,
-          subjectId,
-          examId,
-        },
+      maxes: {
+        theoryMax: Number(exam.theoryMax), practicalMax: Number(exam.practicalMax),
+        internalMax: Number(exam.internalMax), passPercentage: Number(exam.passPercentage),
       },
-      create: {
-        instituteId: req.user.instituteId,
-        studentId,
-        subjectId,
-        examId,
-        theoryMarks: computed.theoryMarks,
-        practicalMarks: computed.practicalMarks,
-        internalMarks: computed.internalMarks,
-        totalMarks: computed.totalMarks,
-        maxMarks: computed.maxMarks,
-        grade: computed.grade,
-        gradePoints: computed.gradePoints,
-        isPassed: computed.isPassed,
-        publishedAt: exam.isPublished ? new Date() : null,
-      },
-      update: {
-        theoryMarks: computed.theoryMarks,
-        practicalMarks: computed.practicalMarks,
-        internalMarks: computed.internalMarks,
-        totalMarks: computed.totalMarks,
-        maxMarks: computed.maxMarks,
-        grade: computed.grade,
-        gradePoints: computed.gradePoints,
-        isPassed: computed.isPassed,
-      },
-      include: {
-        student: { select: { firstName: true, lastName: true, rollNumber: true } },
-        subject: true,
-      },
+      publish: exam.isPublished,
     });
     return success(res, result, 'Marks saved');
   } catch (err) { next(err); }
 });
 
-router.post('/bulk', async (req, res, next) => {
+router.post('/bulk', requirePermission('ENTER_MARKS'), async (req, res, next) => {
   try {
     const { examId, subjectId, entries } = req.body;
     if (!examId || !subjectId || !Array.isArray(entries)) {
@@ -125,55 +80,14 @@ router.post('/bulk', async (req, res, next) => {
     });
     if (!exam) throw new AppError('Exam not found', 404);
 
-    const saved = [];
-    for (const entry of entries) {
-      const computed = computeResult({
-        theoryMarks: entry.theoryMarks,
-        practicalMarks: entry.practicalMarks,
-        internalMarks: entry.internalMarks,
-        theoryMax: Number(exam.theoryMax),
-        practicalMax: Number(exam.practicalMax),
-        internalMax: Number(exam.internalMax),
-        passPercentage: Number(exam.passPercentage),
-      });
-
-      const result = await prisma.result.upsert({
-        where: {
-          instituteId_studentId_subjectId_examId: {
-            instituteId: req.user.instituteId,
-            studentId: entry.studentId,
-            subjectId,
-            examId,
-          },
-        },
-        create: {
-          instituteId: req.user.instituteId,
-          studentId: entry.studentId,
-          subjectId,
-          examId,
-          theoryMarks: computed.theoryMarks,
-          practicalMarks: computed.practicalMarks,
-          internalMarks: computed.internalMarks,
-          totalMarks: computed.totalMarks,
-          maxMarks: computed.maxMarks,
-          grade: computed.grade,
-          gradePoints: computed.gradePoints,
-          isPassed: computed.isPassed,
-          publishedAt: exam.isPublished ? new Date() : null,
-        },
-        update: {
-          theoryMarks: computed.theoryMarks,
-          practicalMarks: computed.practicalMarks,
-          internalMarks: computed.internalMarks,
-          totalMarks: computed.totalMarks,
-          maxMarks: computed.maxMarks,
-          grade: computed.grade,
-          gradePoints: computed.gradePoints,
-          isPassed: computed.isPassed,
-        },
-      });
-      saved.push(result);
-    }
+    const saved = await bulkEnterResults({
+      instituteId: req.user.instituteId, track: 'ACADEMIC', entries, examId, subjectId,
+      maxes: {
+        theoryMax: Number(exam.theoryMax), practicalMax: Number(exam.practicalMax),
+        internalMax: Number(exam.internalMax), passPercentage: Number(exam.passPercentage),
+      },
+      publish: exam.isPublished,
+    });
     return success(res, saved, `${saved.length} results saved`);
   } catch (err) { next(err); }
 });

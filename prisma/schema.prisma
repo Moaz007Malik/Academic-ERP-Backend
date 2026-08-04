@@ -19,6 +19,8 @@ enum InstituteStatus {
 enum UserRole {
   SUPER_ADMIN
   INSTITUTE_ADMIN
+  PRINCIPAL
+  EXAM_CONTROLLER
   TEACHER
   STUDENT
   PARENT
@@ -137,6 +139,20 @@ enum ExamType {
   SUPPLY
 }
 
+/// Discriminator for the 3 parallel academic tracks sharing Attendance/Result/TeacherAssignment
+enum AcademicTrack {
+  ACADEMIC
+  DEGREE
+  INDIVIDUAL_COURSE
+}
+
+/// ACADEMIC-track TeacherAssignment scope: CLASS covers every Section of that Class,
+/// SECTION overrides the class-level default for one Section only
+enum AssignmentScope {
+  CLASS
+  SECTION
+}
+
 enum PersonDocType {
   STUDENT
   TEACHER
@@ -175,174 +191,171 @@ model SubscriptionPlan {
 // ─── Tenant Root ─────────────────────────────────────────────────────────────
 
 model Institute {
-  id              String          @id @default(uuid())
-  instituteCode   String          @unique @db.VarChar(20)
-  name            String          @db.VarChar(200)
-  logo            String?         @db.VarChar(500)
-  address         String?
-  phone           String?         @db.VarChar(20)
-  email           String?         @db.VarChar(200)
-  status          InstituteStatus @default(ACTIVE)
-  planId          String?
-  plan            SubscriptionPlan? @relation(fields: [planId], references: [id])
-  storageQuotaMB  Int             @default(5120)
-  storageUsedMB   Int             @default(0)
-  activeModules   String[]
-  settings        Json          @default("{}")
-  expiryDate      DateTime?
-  deletedAt       DateTime?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  id             String            @id @default(uuid())
+  instituteCode  String            @unique @db.VarChar(20)
+  name           String            @db.VarChar(200)
+  logo           String?           @db.VarChar(500)
+  address        String?
+  phone          String?           @db.VarChar(20)
+  email          String?           @db.VarChar(200)
+  status         InstituteStatus   @default(ACTIVE)
+  planId         String?
+  plan           SubscriptionPlan? @relation(fields: [planId], references: [id])
+  storageQuotaMB Int               @default(5120)
+  storageUsedMB  Int               @default(0)
+  activeModules  String[]
+  settings       Json              @default("{}")
+  expiryDate     DateTime?
+  deletedAt      DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
-  users              User[]
-  students           Student[]
-  teachers           Teacher[]
-  departments        Department[]
-  academicClasses    AcademicClass[]
-  courses            Course[]
-  subjects           Subject[]
-  batches            Batch[]
-  sections           Section[]
-  sessions           Session[]
-  semesters          Semester[]
-  attendance         Attendance[]
-  feeStructures      FeeStructure[]
-  fees               Fee[]
-  exams              Exam[]
-  results            Result[]
-  timetable          Timetable[]
-  assignments        Assignment[]
-  libraryBooks       LibraryBook[]
-  libraryIssues      LibraryIssue[]
-  hostelRooms        HostelRoom[]
-  hostelAllotments   HostelAllotment[]
-  transportRoutes    TransportRoute[]
-  transportAllotments TransportAllotment[]
-  notifications      Notification[]
-  announcements      Announcement[]
-  cardDesigns        CardDesign[]
-  certificates       Certificate[]
-  loginHistory       LoginHistory[]
-  salaries           Salary[]
-  leaveRequests      LeaveRequest[]
-  inventoryItems     InventoryItem[]
-  supportTickets     SupportTicket[]
-  auditLogs          AuditLog[]
-  subscriptionInvoices SubscriptionInvoice[]
-  individualCourses    IndividualCourse[]
-  individualCourseAttendance IndividualCourseAttendance[]
-  degrees              Degree[]
-  degreeBatches        DegreeBatch[]
-  degreeSemesters      DegreeSemester[]
+  users                 User[]
+  students              Student[]
+  teachers              Teacher[]
+  departments           Department[]
+  academicClasses       AcademicClass[]
+  courses               Course[]
+  subjects              Subject[]
+  batches               Batch[]
+  sections              Section[]
+  sessions              Session[]
+  semesters             Semester[]
+  attendance            Attendance[]
+  feeStructures         FeeStructure[]
+  fees                  Fee[]
+  exams                 Exam[]
+  results               Result[]
+  timetable             Timetable[]
+  assignments           Assignment[]
+  libraryBooks          LibraryBook[]
+  libraryIssues         LibraryIssue[]
+  hostelRooms           HostelRoom[]
+  hostelAllotments      HostelAllotment[]
+  transportRoutes       TransportRoute[]
+  transportAllotments   TransportAllotment[]
+  notifications         Notification[]
+  announcements         Announcement[]
+  cardDesigns           CardDesign[]
+  certificates          Certificate[]
+  loginHistory          LoginHistory[]
+  salaries              Salary[]
+  leaveRequests         LeaveRequest[]
+  inventoryItems        InventoryItem[]
+  supportTickets        SupportTicket[]
+  auditLogs             AuditLog[]
+  subscriptionInvoices  SubscriptionInvoice[]
+  individualCourses     IndividualCourse[]
+  degrees               Degree[]
+  degreeBatches         DegreeBatch[]
+  degreeSemesters       DegreeSemester[]
   degreeSemesterCourses DegreeSemesterCourse[]
-  degreeStudents       DegreeStudent[]
-  degreeAttendance     DegreeAttendance[]
-  degreeResults        DegreeResult[]
-  teacherAssignments TeacherAssignment[]
-  personDocuments    PersonDocument[]
-  feeRequests        FeeRequest[]
+  degreeStudents        DegreeStudent[]
+  teacherAssignments    TeacherAssignment[]
+  personDocuments       PersonDocument[]
+  feeRequests           FeeRequest[]
   // Enterprise relations
-  guardians          Guardian[]
-  parentStudentLinks ParentStudentLink[]
-  buildings          Building[]
-  classrooms         Classroom[]
-  rooms              Room[]
-  calendarEvents     AcademicCalendarEvent[]
-  hostelBlocks       HostelBlock[]
-  hostelFloors       HostelFloor[]
-  hostelRoomsExt     HostelRoomExtended[]
-  buses              Bus[]
-  transportStops     TransportStop[]
-  routeStops         RouteStop[]
-  routeBuses         RouteBus[]
-  questionBanks      QuestionBank[]
-  quizzes            Quiz[]
-  quizAnswers        QuizAnswer[]
-  assignmentFiles    AssignmentFile[]
-  vendors            Vendor[]
-  purchaseOrders     PurchaseOrder[]
-  inventoryTxns      InventoryTransaction[]
-  assets             Asset[]
-  maintenanceRecords MaintenanceRecord[]
-  salaryComponents   SalaryComponent[]
-  payrollDetails     PayrollDetail[]
-  leaveBalances      LeaveBalance[]
-  biometricLogs      BiometricLog[]
-  emailLogs          EmailLog[]
-  smsLogs            SmsLog[]
-  fileStorageRecords FileStorageRecord[]
-  featureFlagOverrides InstituteFeatureFlag[]
-  theme              InstituteTheme?
-  branding           InstituteBranding?
-  backups            BackupRecord[]
-  webhooks           Webhook[]
-  activityStreams    ActivityStream[]
-  apiKeys            ApiKey[]
-  workflowDefinitions WorkflowDefinition[]
-  workflowInstances  WorkflowInstance[]
-  formDefinitions    FormDefinition[]
-  formSubmissions    FormSubmission[]
-  abTestExperiments  AbTestExperiment[]
-  documentVersions   DocumentVersion[]
-  domainEvents       DomainEvent[]
-  ipWhitelists       IpWhitelist[]
-  dataConsents       DataConsent[]
-  dataExportRequests DataExportRequest[]
-  erasureRequests    ErasureRequest[]
-  analyticsSnapshots AnalyticsSnapshot[]
+  guardians             Guardian[]
+  parentStudentLinks    ParentStudentLink[]
+  buildings             Building[]
+  classrooms            Classroom[]
+  rooms                 Room[]
+  calendarEvents        AcademicCalendarEvent[]
+  hostelBlocks          HostelBlock[]
+  hostelFloors          HostelFloor[]
+  hostelRoomsExt        HostelRoomExtended[]
+  buses                 Bus[]
+  transportStops        TransportStop[]
+  routeStops            RouteStop[]
+  routeBuses            RouteBus[]
+  questionBanks         QuestionBank[]
+  quizzes               Quiz[]
+  quizAnswers           QuizAnswer[]
+  assignmentFiles       AssignmentFile[]
+  vendors               Vendor[]
+  purchaseOrders        PurchaseOrder[]
+  inventoryTxns         InventoryTransaction[]
+  assets                Asset[]
+  maintenanceRecords    MaintenanceRecord[]
+  salaryComponents      SalaryComponent[]
+  payrollDetails        PayrollDetail[]
+  leaveBalances         LeaveBalance[]
+  biometricLogs         BiometricLog[]
+  emailLogs             EmailLog[]
+  smsLogs               SmsLog[]
+  fileStorageRecords    FileStorageRecord[]
+  featureFlagOverrides  InstituteFeatureFlag[]
+  theme                 InstituteTheme?
+  branding              InstituteBranding?
+  backups               BackupRecord[]
+  webhooks              Webhook[]
+  activityStreams       ActivityStream[]
+  apiKeys               ApiKey[]
+  workflowDefinitions   WorkflowDefinition[]
+  workflowInstances     WorkflowInstance[]
+  formDefinitions       FormDefinition[]
+  formSubmissions       FormSubmission[]
+  abTestExperiments     AbTestExperiment[]
+  documentVersions      DocumentVersion[]
+  domainEvents          DomainEvent[]
+  ipWhitelists          IpWhitelist[]
+  dataConsents          DataConsent[]
+  dataExportRequests    DataExportRequest[]
+  erasureRequests       ErasureRequest[]
+  analyticsSnapshots    AnalyticsSnapshot[]
 }
 
 model User {
-  id             String    @id @default(uuid())
+  id             String     @id @default(uuid())
   instituteId    String?
   institute      Institute? @relation(fields: [instituteId], references: [id])
-  email          String    @unique @db.VarChar(200)
-  passwordHash   String    @db.VarChar(500)
-  /** Institute-visible portal password (set on create/reset by admin only) */
-  portalPassword String?   @db.VarChar(200)
-  firstName      String?   @db.VarChar(100)
-  lastName       String?   @db.VarChar(100)
+  email          String     @unique @db.VarChar(200)
+  passwordHash   String     @db.VarChar(500)
+  /**
+   * Institute-visible portal password (set on create/reset by admin only)
+   */
+  portalPassword String?    @db.VarChar(200)
+  firstName      String?    @db.VarChar(100)
+  lastName       String?    @db.VarChar(100)
   role           UserRole
-  isActive       Boolean   @default(true)
-  mustChangePass Boolean   @default(false)
+  isActive       Boolean    @default(true)
+  mustChangePass Boolean    @default(false)
   lastLoginAt    DateTime?
   lastLoginIp    String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
-  student        Student?
-  teacher        Teacher?
-  loginHistory   LoginHistory[]
-  ticketsCreated SupportTicket[] @relation("TicketCreator")
-  ticketsEscalated SupportTicket[] @relation("TicketEscalator")
-  ticketReplies  TicketReply[]
-  auditLogs      AuditLog[]
-  attendanceMarked Attendance[] @relation("MarkedBy")
-  icAttendanceMarked IndividualCourseAttendance[] @relation("ICMarkedBy")
-  degreeAttendanceMarked DegreeAttendance[] @relation("DegreeMarkedBy")
-  feesCollected  Fee[]         @relation("CollectedBy")
-  feeRequestsReviewed FeeRequest[] @relation("FeeRequestReviewer")
-  invoicesCreated SubscriptionInvoice[] @relation("InvoiceCreator")
-  leaveRequests  LeaveRequest[]
-  assignments    Assignment[]
-  documentsUploaded PersonDocument[] @relation("UploadedBy")
-  guardianProfile Guardian?
-  notificationReads NotificationRead[]
-  inventoryTxns InventoryTransaction[] @relation("InventoryTxnBy")
-  leaveBalances LeaveBalance[]
-  biometricLogs BiometricLog[]
-  activityStreams ActivityStream[] @relation("ActivityActor")
-  apiKeysCreated ApiKey[] @relation("ApiKeyCreator")
-  workflowInstancesInitiated WorkflowInstance[] @relation("WorkflowInitiator")
-  workflowApprovals WorkflowApproval[] @relation("WorkflowApprover")
-  workflowAuditLogs WorkflowAuditLog[] @relation("WorkflowAuditActor")
-  formSubmissions FormSubmission[] @relation("FormSubmitter")
-  documentVersions DocumentVersion[] @relation("DocVersionCreator")
-  userSessions UserSession[]
-  mfaDevices MfaDevice[]
-  passwordHistories PasswordHistory[]
-  dataConsents DataConsent[]
-  dataExportRequests DataExportRequest[] @relation("ExportRequester")
+  student                    Student?
+  teacher                    Teacher?
+  loginHistory               LoginHistory[]
+  ticketsCreated             SupportTicket[]        @relation("TicketCreator")
+  ticketsEscalated           SupportTicket[]        @relation("TicketEscalator")
+  ticketReplies              TicketReply[]
+  auditLogs                  AuditLog[]
+  attendanceMarked           Attendance[]           @relation("MarkedBy")
+  feesCollected              Fee[]                  @relation("CollectedBy")
+  feeRequestsReviewed        FeeRequest[]           @relation("FeeRequestReviewer")
+  invoicesCreated            SubscriptionInvoice[]  @relation("InvoiceCreator")
+  leaveRequests              LeaveRequest[]
+  assignments                Assignment[]
+  documentsUploaded          PersonDocument[]       @relation("UploadedBy")
+  guardianProfile            Guardian?
+  notificationReads          NotificationRead[]
+  inventoryTxns              InventoryTransaction[] @relation("InventoryTxnBy")
+  leaveBalances              LeaveBalance[]
+  biometricLogs              BiometricLog[]
+  activityStreams            ActivityStream[]       @relation("ActivityActor")
+  apiKeysCreated             ApiKey[]               @relation("ApiKeyCreator")
+  workflowInstancesInitiated WorkflowInstance[]     @relation("WorkflowInitiator")
+  workflowApprovals          WorkflowApproval[]     @relation("WorkflowApprover")
+  workflowAuditLogs          WorkflowAuditLog[]     @relation("WorkflowAuditActor")
+  formSubmissions            FormSubmission[]       @relation("FormSubmitter")
+  documentVersions           DocumentVersion[]      @relation("DocVersionCreator")
+  userSessions               UserSession[]
+  mfaDevices                 MfaDevice[]
+  passwordHistories          PasswordHistory[]
+  dataConsents               DataConsent[]
+  dataExportRequests         DataExportRequest[]    @relation("ExportRequester")
 
   @@index([instituteId, role])
   @@index([email])
@@ -379,8 +392,9 @@ model AcademicClass {
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
-  subjects Subject[]
-  batches  Batch[]
+  subjects           Subject[]
+  batches            Batch[]
+  teacherAssignments TeacherAssignment[]
 
   @@unique([instituteId, departmentId, name])
   @@index([instituteId])
@@ -403,23 +417,23 @@ model Course {
 }
 
 model Subject {
-  id          String         @id @default(uuid())
-  instituteId String
-  institute   Institute      @relation(fields: [instituteId], references: [id])
+  id            String         @id @default(uuid())
+  instituteId   String
+  institute     Institute      @relation(fields: [instituteId], references: [id])
   /// Linked to AcademicClass (preferred). Course link kept for legacy rows.
-  classId     String?
+  classId       String?
   academicClass AcademicClass? @relation(fields: [classId], references: [id], onDelete: Cascade)
-  courseId    String?
-  course      Course?        @relation(fields: [courseId], references: [id], onDelete: SetNull)
-  name        String         @db.VarChar(200)
-  code        String?        @db.VarChar(20)
-  creditHours Int            @default(0)
-  createdAt   DateTime       @default(now())
+  courseId      String?
+  course        Course?        @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  name          String         @db.VarChar(200)
+  code          String?        @db.VarChar(20)
+  creditHours   Int            @default(0)
+  createdAt     DateTime       @default(now())
 
-  attendance Attendance[]
-  results    Result[]
-  timetable  Timetable[]
-  assignments Assignment[]
+  attendance         Attendance[]
+  results            Result[]
+  timetable          Timetable[]
+  assignments        Assignment[]
   teacherAssignments TeacherAssignment[]
 
   questionBanks QuestionBank[]
@@ -438,8 +452,8 @@ model Session {
   isActive    Boolean   @default(false)
   createdAt   DateTime  @default(now())
 
-  semesters Semester[]
-  batches   Batch[]
+  semesters      Semester[]
+  batches        Batch[]
   calendarEvents AcademicCalendarEvent[]
 
   @@index([instituteId])
@@ -463,16 +477,16 @@ model Semester {
 }
 
 model Batch {
-  id          String         @id @default(uuid())
-  instituteId String
-  institute   Institute      @relation(fields: [instituteId], references: [id])
-  sessionId   String?
-  session     Session?       @relation(fields: [sessionId], references: [id])
-  classId     String?
+  id            String         @id @default(uuid())
+  instituteId   String
+  institute     Institute      @relation(fields: [instituteId], references: [id])
+  sessionId     String?
+  session       Session?       @relation(fields: [sessionId], references: [id])
+  classId       String?
   academicClass AcademicClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
-  name        String         @db.VarChar(100)
-  year        Int?
-  createdAt   DateTime       @default(now())
+  name          String         @db.VarChar(100)
+  year          Int?
+  createdAt     DateTime       @default(now())
 
   sections Section[]
   students Student[]
@@ -491,10 +505,10 @@ model Section {
   capacity    Int?
   createdAt   DateTime  @default(now())
 
-  students Student[]
+  students           Student[]
   teacherAssignments TeacherAssignment[]
-  exams    Exam[]
-  timetable Timetable[]
+  exams              Exam[]
+  timetable          Timetable[]
 
   @@index([instituteId])
 }
@@ -502,45 +516,45 @@ model Section {
 // ─── People ──────────────────────────────────────────────────────────────────
 
 model Student {
-  id               String        @id @default(uuid())
-  instituteId      String
-  institute        Institute     @relation(fields: [instituteId], references: [id])
-  userId           String?       @unique
-  user             User?         @relation(fields: [userId], references: [id])
-  rollNumber       String?       @db.VarChar(50)
-  firstName        String        @db.VarChar(100)
-  lastName         String        @db.VarChar(100)
-  dateOfBirth      DateTime?     @db.Date
-  gender           Gender?
-  cnic             String?       @db.VarChar(15)
-  phone            String?       @db.VarChar(20)
-  address          String?
-  photo            String?       @db.VarChar(500)
-  guardianName     String?       @db.VarChar(200)
-  guardianPhone    String?       @db.VarChar(20)
-  guardianRelation String?       @db.VarChar(50)
-  guardianEmail    String?       @db.VarChar(200)
-  fatherName       String?       @db.VarChar(200)
-  motherName       String?       @db.VarChar(200)
-  registrationNumber String?     @db.VarChar(50)
-  admissionNumber  String?       @db.VarChar(50)
-  bloodGroup       String?       @db.VarChar(10)
-  notes            String?
-  enrollmentDate   DateTime?     @db.Date
-  status           StudentStatus @default(ACTIVE)
-  deletedAt        DateTime?
-  archivedAt       DateTime?
-  currentBatchId   String?
-  currentBatch     Batch?        @relation(fields: [currentBatchId], references: [id])
-  currentSectionId String?
-  currentSection   Section?      @relation(fields: [currentSectionId], references: [id])
+  id                      String        @id @default(uuid())
+  instituteId             String
+  institute               Institute     @relation(fields: [instituteId], references: [id])
+  userId                  String?       @unique
+  user                    User?         @relation(fields: [userId], references: [id])
+  rollNumber              String?       @db.VarChar(50)
+  firstName               String        @db.VarChar(100)
+  lastName                String        @db.VarChar(100)
+  dateOfBirth             DateTime?     @db.Date
+  gender                  Gender?
+  cnic                    String?       @db.VarChar(15)
+  phone                   String?       @db.VarChar(20)
+  address                 String?
+  photo                   String?       @db.VarChar(500)
+  guardianName            String?       @db.VarChar(200)
+  guardianPhone           String?       @db.VarChar(20)
+  guardianRelation        String?       @db.VarChar(50)
+  guardianEmail           String?       @db.VarChar(200)
+  fatherName              String?       @db.VarChar(200)
+  motherName              String?       @db.VarChar(200)
+  registrationNumber      String?       @db.VarChar(50)
+  admissionNumber         String?       @db.VarChar(50)
+  bloodGroup              String?       @db.VarChar(10)
+  notes                   String?
+  enrollmentDate          DateTime?     @db.Date
+  status                  StudentStatus @default(ACTIVE)
+  deletedAt               DateTime?
+  archivedAt              DateTime?
+  currentBatchId          String?
+  currentBatch            Batch?        @relation(fields: [currentBatchId], references: [id])
+  currentSectionId        String?
+  currentSection          Section?      @relation(fields: [currentSectionId], references: [id])
   /// Snapshot of Class fees at admission (do not auto-change when Class fees update)
-  assignedRegistrationFee Decimal? @db.Decimal(10, 2)
-  assignedMonthlyFee      Decimal? @db.Decimal(10, 2)
-  registrationDiscount    Decimal  @default(0) @db.Decimal(10, 2)
-  monthlyDiscount         Decimal  @default(0) @db.Decimal(10, 2)
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  assignedRegistrationFee Decimal?      @db.Decimal(10, 2)
+  assignedMonthlyFee      Decimal?      @db.Decimal(10, 2)
+  registrationDiscount    Decimal       @default(0) @db.Decimal(10, 2)
+  monthlyDiscount         Decimal       @default(0) @db.Decimal(10, 2)
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
 
   attendance          Attendance[]
   fees                Fee[]
@@ -559,51 +573,47 @@ model Student {
   promotions          StudentPromotion[]
   studentNotes        StudentNote[]
   courseEnrollments   IndividualCourseEnrollment[]
-  individualCourseAttendance IndividualCourseAttendance[]
   degreeStudents      DegreeStudent[]
-  degreeAttendance    DegreeAttendance[]
 
   @@unique([instituteId, rollNumber])
   @@index([instituteId, deletedAt])
 }
 
 model Teacher {
-  id             String        @id @default(uuid())
-  instituteId    String
-  institute      Institute     @relation(fields: [instituteId], references: [id])
-  userId         String?       @unique
-  user           User?         @relation(fields: [userId], references: [id])
-  employeeCode   String?       @db.VarChar(50)
-  firstName      String        @db.VarChar(100)
-  lastName       String        @db.VarChar(100)
-  qualification  String?       @db.VarChar(200)
-  specialization String?       @db.VarChar(200)
-  departmentId   String?
-  department     Department?   @relation(fields: [departmentId], references: [id])
-  designation    String?       @db.VarChar(100)
-  employmentType String?       @db.VarChar(50)
+  id              String        @id @default(uuid())
+  instituteId     String
+  institute       Institute     @relation(fields: [instituteId], references: [id])
+  userId          String?       @unique
+  user            User?         @relation(fields: [userId], references: [id])
+  employeeCode    String?       @db.VarChar(50)
+  firstName       String        @db.VarChar(100)
+  lastName        String        @db.VarChar(100)
+  qualification   String?       @db.VarChar(200)
+  specialization  String?       @db.VarChar(200)
+  departmentId    String?
+  department      Department?   @relation(fields: [departmentId], references: [id])
+  designation     String?       @db.VarChar(100)
+  employmentType  String?       @db.VarChar(50)
   experienceYears Int?
-  phone          String?       @db.VarChar(20)
-  photo          String?       @db.VarChar(500)
-  paymentMethod  String?       @db.VarChar(50)
-  allowances     Decimal?      @db.Decimal(10, 2)
-  deductions     Decimal?      @db.Decimal(10, 2)
-  notes          String?
-  joiningDate    DateTime?     @db.Date
-  salary         Decimal?      @db.Decimal(10, 2)
-  status         TeacherStatus @default(ACTIVE)
-  deletedAt      DateTime?
-  archivedAt     DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  phone           String?       @db.VarChar(20)
+  photo           String?       @db.VarChar(500)
+  paymentMethod   String?       @db.VarChar(50)
+  allowances      Decimal?      @db.Decimal(10, 2)
+  deductions      Decimal?      @db.Decimal(10, 2)
+  notes           String?
+  joiningDate     DateTime?     @db.Date
+  salary          Decimal?      @db.Decimal(10, 2)
+  status          TeacherStatus @default(ACTIVE)
+  deletedAt       DateTime?
+  archivedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   timetable     Timetable[]
   salaries      Salary[]
   leaveRequests LeaveRequest[]
   assignments   TeacherAssignment[]
   documents     PersonDocument[]
-  individualCourses IndividualCourseTeacher[]
-  degreeCourseTeachers DegreeCourseTeacher[]
 
   @@index([instituteId])
 }
@@ -656,43 +666,33 @@ enum CourseEnrollmentStatus {
 }
 
 model IndividualCourse {
-  id                String                 @id @default(uuid())
+  id                String                      @id @default(uuid())
   instituteId       String
-  institute         Institute              @relation(fields: [instituteId], references: [id])
-  name              String                 @db.VarChar(200)
-  code              String                 @db.VarChar(50)
-  duration          String?                @db.VarChar(100)
+  institute         Institute                   @relation(fields: [instituteId], references: [id])
+  name              String                      @db.VarChar(200)
+  code              String                      @db.VarChar(50)
+  duration          String?                     @db.VarChar(100)
   startDate         DateTime?
   endDate           DateTime?
-  capacity          Int                    @default(30)
+  capacity          Int                         @default(30)
   description       String?
-  status            IndividualCourseStatus @default(ACTIVE)
+  status            IndividualCourseStatus      @default(ACTIVE)
   paymentType       IndividualCoursePaymentType @default(ONE_TIME)
-  admissionFee      Decimal                @default(0) @db.Decimal(10, 2)
-  monthlyFee        Decimal                @default(0) @db.Decimal(10, 2)
-  oneTimeFee        Decimal                @default(0) @db.Decimal(10, 2)
-  discountAmount    Decimal                @default(0) @db.Decimal(10, 2)
-  scholarshipAmount Decimal                @default(0) @db.Decimal(10, 2)
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
+  admissionFee      Decimal                     @default(0) @db.Decimal(10, 2)
+  monthlyFee        Decimal                     @default(0) @db.Decimal(10, 2)
+  oneTimeFee        Decimal                     @default(0) @db.Decimal(10, 2)
+  discountAmount    Decimal                     @default(0) @db.Decimal(10, 2)
+  scholarshipAmount Decimal                     @default(0) @db.Decimal(10, 2)
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
 
-  teachers    IndividualCourseTeacher[]
-  enrollments IndividualCourseEnrollment[]
-  attendance  IndividualCourseAttendance[]
+  teacherAssignments TeacherAssignment[]
+  enrollments        IndividualCourseEnrollment[]
+  attendance         Attendance[]
+  timetable          Timetable[]
 
   @@unique([instituteId, code])
   @@index([instituteId, status])
-}
-
-model IndividualCourseTeacher {
-  id        String           @id @default(uuid())
-  courseId  String
-  course    IndividualCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  teacherId String
-  teacher   Teacher          @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  createdAt DateTime         @default(now())
-
-  @@unique([courseId, teacherId])
 }
 
 model IndividualCourseEnrollment {
@@ -711,25 +711,6 @@ model IndividualCourseEnrollment {
 
   @@unique([courseId, studentId])
   @@index([instituteId])
-}
-
-model IndividualCourseAttendance {
-  id            String           @id @default(uuid())
-  instituteId   String
-  institute     Institute        @relation(fields: [instituteId], references: [id])
-  courseId      String
-  course        IndividualCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  studentId     String
-  student       Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  date          DateTime         @db.Date
-  lectureNumber Int              @default(1)
-  status        AttendanceStatus
-  markedById    String?
-  markedBy      User?            @relation("ICMarkedBy", fields: [markedById], references: [id])
-  createdAt     DateTime         @default(now())
-
-  @@unique([instituteId, courseId, studentId, date, lectureNumber])
-  @@index([instituteId, courseId, date])
 }
 
 // ─── Degree Programs (independent from classes) ──────────────────────────────
@@ -775,20 +756,20 @@ model Degree {
 }
 
 model DegreeBatch {
-  id               String            @id @default(uuid())
-  instituteId      String
-  institute        Institute         @relation(fields: [instituteId], references: [id])
-  degreeId         String
-  degree           Degree            @relation(fields: [degreeId], references: [id], onDelete: Cascade)
-  name             String            @db.VarChar(100)
-  maxStudents      Int               @default(50)
-  totalSemesters   Int               @default(8)
-  registrationFee     Decimal           @default(0) @db.Decimal(10, 2)
-  defaultSemesterFee  Decimal           @default(0) @db.Decimal(10, 2)
-  currentSemester     Int               @default(1)
-  status           DegreeBatchStatus @default(ACTIVE)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                 String            @id @default(uuid())
+  instituteId        String
+  institute          Institute         @relation(fields: [instituteId], references: [id])
+  degreeId           String
+  degree             Degree            @relation(fields: [degreeId], references: [id], onDelete: Cascade)
+  name               String            @db.VarChar(100)
+  maxStudents        Int               @default(50)
+  totalSemesters     Int               @default(8)
+  registrationFee    Decimal           @default(0) @db.Decimal(10, 2)
+  defaultSemesterFee Decimal           @default(0) @db.Decimal(10, 2)
+  currentSemester    Int               @default(1)
+  status             DegreeBatchStatus @default(ACTIVE)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
 
   semesters DegreeSemester[]
   students  DegreeStudent[]
@@ -811,7 +792,7 @@ model DegreeSemester {
   updatedAt   DateTime    @updatedAt
 
   courses DegreeSemesterCourse[]
-  results DegreeResult[]
+  results Result[]
 
   @@unique([batchId, number])
   @@index([instituteId])
@@ -829,23 +810,13 @@ model DegreeSemesterCourse {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  teachers   DegreeCourseTeacher[]
-  attendance DegreeAttendance[]
-  results    DegreeResult[]
+  teacherAssignments TeacherAssignment[]
+  attendance         Attendance[]
+  results            Result[]
+  timetable          Timetable[]
 
   @@unique([semesterId, code])
   @@index([instituteId])
-}
-
-model DegreeCourseTeacher {
-  id        String               @id @default(uuid())
-  courseId  String
-  course    DegreeSemesterCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  teacherId String
-  teacher   Teacher              @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  createdAt DateTime             @default(now())
-
-  @@unique([courseId, teacherId])
 }
 
 model DegreeStudent {
@@ -869,61 +840,11 @@ model DegreeStudent {
   updatedAt             DateTime            @updatedAt
 
   fees       Fee[]
-  attendance DegreeAttendance[]
-  results    DegreeResult[]
+  attendance Attendance[]
+  results    Result[]
 
   @@unique([batchId, studentId])
   @@index([instituteId, status])
-}
-
-model DegreeAttendance {
-  id              String               @id @default(uuid())
-  instituteId     String
-  institute       Institute            @relation(fields: [instituteId], references: [id])
-  courseId        String
-  course          DegreeSemesterCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  degreeStudentId String
-  degreeStudent   DegreeStudent        @relation(fields: [degreeStudentId], references: [id], onDelete: Cascade)
-  studentId       String
-  student         Student              @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  date            DateTime             @db.Date
-  lectureNumber   Int                  @default(1)
-  status          AttendanceStatus
-  markedById      String?
-  markedBy        User?                @relation("DegreeMarkedBy", fields: [markedById], references: [id])
-  createdAt       DateTime             @default(now())
-
-  @@unique([instituteId, courseId, studentId, date, lectureNumber])
-  @@index([instituteId, courseId, date])
-}
-
-model DegreeResult {
-  id              String               @id @default(uuid())
-  instituteId     String
-  institute       Institute            @relation(fields: [instituteId], references: [id])
-  degreeStudentId String
-  degreeStudent   DegreeStudent        @relation(fields: [degreeStudentId], references: [id], onDelete: Cascade)
-  semesterId      String
-  semester        DegreeSemester       @relation(fields: [semesterId], references: [id], onDelete: Cascade)
-  courseId        String
-  course          DegreeSemesterCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  theoryMarks     Decimal?             @db.Decimal(6, 2)
-  practicalMarks  Decimal?             @db.Decimal(6, 2)
-  internalMarks   Decimal?             @db.Decimal(6, 2)
-  totalMarks      Decimal?             @db.Decimal(6, 2)
-  maxMarks        Decimal?             @db.Decimal(6, 2)
-  grade           String?              @db.VarChar(5)
-  gradePoints     Decimal?             @db.Decimal(3, 2)
-  percentage      Decimal?             @db.Decimal(6, 2)
-  passPercentage  Decimal?             @db.Decimal(5, 2)
-  remarks         String?
-  isPassed        Boolean?
-  publishedAt     DateTime?
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-
-  @@unique([degreeStudentId, courseId, semesterId])
-  @@index([instituteId, semesterId])
 }
 
 model PersonDocument {
@@ -950,33 +871,63 @@ model PersonDocument {
   @@index([instituteId, teacherId])
 }
 
+/// Unified across all 3 tracks (replaces the old per-track TeacherAssignment/
+/// IndividualCourseTeacher/DegreeCourseTeacher join tables). For track=ACADEMIC, scope=CLASS
+/// covers every Section of classId; scope=SECTION overrides the class-level default for one
+/// Section. Exactly one of (classId,sectionId) / degreeCourseId / individualCourseId is set,
+/// matching `track` — enforced in src/services/teacherAssignment.service.js, not by the DB alone
+/// (Postgres treats NULL as distinct in unique indexes, so these 4 constraints only guard
+/// duplicates within the same track/scope, not cross-track column misuse).
 model TeacherAssignment {
-  id          String    @id @default(uuid())
+  id          String        @id @default(uuid())
   instituteId String
-  institute   Institute @relation(fields: [instituteId], references: [id])
+  institute   Institute     @relation(fields: [instituteId], references: [id])
+  track       AcademicTrack @default(ACADEMIC)
   teacherId   String
-  teacher     Teacher   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
-  subjectId   String
-  subject     Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  sectionId   String
-  section     Section   @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now())
+  teacher     Teacher       @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
 
-  @@unique([instituteId, teacherId, subjectId, sectionId])
+  // ── ACADEMIC track only ──
+  scope         AssignmentScope?
+  subjectId     String?
+  subject       Subject?         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  classId       String?
+  academicClass AcademicClass?   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  sectionId     String?
+  section       Section?         @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  // ── DEGREE track only ──
+  degreeCourseId String?
+  degreeCourse   DegreeSemesterCourse? @relation(fields: [degreeCourseId], references: [id], onDelete: Cascade)
+
+  // ── INDIVIDUAL_COURSE track only ──
+  individualCourseId String?
+  individualCourse   IndividualCourse? @relation(fields: [individualCourseId], references: [id], onDelete: Cascade)
+
+  @@unique([instituteId, teacherId, subjectId, classId], map: "ta_academic_class_uq")
+  @@unique([instituteId, teacherId, subjectId, sectionId], map: "ta_academic_section_uq")
+  @@unique([instituteId, teacherId, degreeCourseId], map: "ta_degree_uq")
+  @@unique([instituteId, teacherId, individualCourseId], map: "ta_individual_uq")
   @@index([instituteId, teacherId])
+  @@index([instituteId, classId])
   @@index([instituteId, sectionId])
+  @@index([instituteId, degreeCourseId])
+  @@index([instituteId, individualCourseId])
 }
 
 // ─── Academic Operations ─────────────────────────────────────────────────────
 
+/// Unified across all 3 tracks (replaces the old Attendance/DegreeAttendance/
+/// IndividualCourseAttendance tables). Column-per-track invariant enforced in
+/// src/services/attendance.service.js; see TeacherAssignment doc comment for the NULL-uniqueness
+/// caveat that also applies here.
 model Attendance {
   id            String           @id @default(uuid())
   instituteId   String
   institute     Institute        @relation(fields: [instituteId], references: [id])
+  track         AcademicTrack    @default(ACADEMIC)
   studentId     String
   student       Student          @relation(fields: [studentId], references: [id])
-  subjectId     String
-  subject       Subject          @relation(fields: [subjectId], references: [id])
   date          DateTime         @db.Date
   lectureNumber Int              @default(1)
   status        AttendanceStatus
@@ -984,8 +935,25 @@ model Attendance {
   markedBy      User?            @relation("MarkedBy", fields: [markedById], references: [id])
   createdAt     DateTime         @default(now())
 
-  @@unique([instituteId, studentId, subjectId, date, lectureNumber])
+  // ── ACADEMIC track only ──
+  subjectId String?
+  subject   Subject? @relation(fields: [subjectId], references: [id])
+
+  // ── DEGREE track only ──
+  degreeStudentId String?
+  degreeStudent   DegreeStudent?        @relation(fields: [degreeStudentId], references: [id], onDelete: Cascade)
+  degreeCourseId  String?
+  degreeCourse    DegreeSemesterCourse? @relation(fields: [degreeCourseId], references: [id], onDelete: Cascade)
+
+  // ── INDIVIDUAL_COURSE track only ──
+  individualCourseId String?
+  individualCourse   IndividualCourse? @relation(fields: [individualCourseId], references: [id], onDelete: Cascade)
+
+  @@unique([instituteId, studentId, subjectId, date, lectureNumber], map: "att_academic_uq")
+  @@unique([instituteId, degreeCourseId, studentId, date, lectureNumber], map: "att_degree_uq")
+  @@unique([instituteId, individualCourseId, studentId, date, lectureNumber], map: "att_individual_uq")
   @@index([instituteId, studentId, date])
+  @@index([instituteId, track, date])
 }
 
 model Exam {
@@ -1012,50 +980,90 @@ model Exam {
   @@index([instituteId])
 }
 
+/// Unified across ACADEMIC and DEGREE tracks (replaces Result/DegreeResult — Individual Course
+/// has no result concept today). Column-per-track invariant enforced in
+/// src/services/result.service.js; see TeacherAssignment doc comment for the NULL-uniqueness
+/// caveat that also applies here.
 model Result {
-  id             String    @id @default(uuid())
+  id             String        @id @default(uuid())
   instituteId    String
-  institute      Institute @relation(fields: [instituteId], references: [id])
+  institute      Institute     @relation(fields: [instituteId], references: [id])
+  track          AcademicTrack @default(ACADEMIC)
   studentId      String
-  student        Student   @relation(fields: [studentId], references: [id])
-  subjectId      String
-  subject        Subject   @relation(fields: [subjectId], references: [id])
-  examId         String
-  exam           Exam      @relation(fields: [examId], references: [id])
-  theoryMarks    Decimal?  @db.Decimal(5, 2)
-  practicalMarks Decimal?  @db.Decimal(5, 2)
-  internalMarks  Decimal?  @db.Decimal(5, 2)
-  totalMarks     Decimal?  @db.Decimal(5, 2)
-  maxMarks       Decimal?  @db.Decimal(5, 2)
-  grade          String?   @db.VarChar(5)
-  gradePoints    Decimal?  @db.Decimal(3, 2)
+  student        Student       @relation(fields: [studentId], references: [id])
+  theoryMarks    Decimal?      @db.Decimal(6, 2)
+  practicalMarks Decimal?      @db.Decimal(6, 2)
+  internalMarks  Decimal?      @db.Decimal(6, 2)
+  totalMarks     Decimal?      @db.Decimal(6, 2)
+  maxMarks       Decimal?      @db.Decimal(6, 2)
+  grade          String?       @db.VarChar(5)
+  gradePoints    Decimal?      @db.Decimal(3, 2)
+  percentage     Decimal?      @db.Decimal(6, 2)
+  passPercentage Decimal?      @db.Decimal(5, 2)
   isPassed       Boolean?
   remarks        String?
-  position       Int?
+  position       Int? // ACADEMIC only — class rank per exam
   publishedAt    DateTime?
-  createdAt      DateTime  @default(now())
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
-  @@unique([instituteId, studentId, subjectId, examId])
-  @@index([instituteId])
+  // ── ACADEMIC track only ──
+  subjectId String?
+  subject   Subject? @relation(fields: [subjectId], references: [id])
+  examId    String?
+  exam      Exam?    @relation(fields: [examId], references: [id])
+
+  // ── DEGREE track only ──
+  degreeStudentId String?
+  degreeStudent   DegreeStudent?        @relation(fields: [degreeStudentId], references: [id], onDelete: Cascade)
+  semesterId      String?
+  semester        DegreeSemester?       @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  degreeCourseId  String?
+  degreeCourse    DegreeSemesterCourse? @relation(fields: [degreeCourseId], references: [id], onDelete: Cascade)
+
+  @@unique([instituteId, studentId, subjectId, examId], map: "res_academic_uq")
+  @@unique([instituteId, degreeStudentId, degreeCourseId, semesterId], map: "res_degree_uq")
+  @@index([instituteId, track])
+  @@index([instituteId, semesterId])
 }
 
+/// Unified across all 3 tracks. Column-per-track invariant enforced in
+/// src/services/timetable.service.js (see TeacherAssignment doc comment for the NULL-uniqueness/
+/// CHECK-constraint pattern this follows). Conflict detection (same teacher, or same section/
+/// course, double-booked on the same day with an overlapping time range) also lives there.
 model Timetable {
-  id          String    @id @default(uuid())
+  id          String        @id @default(uuid())
   instituteId String
-  institute   Institute @relation(fields: [instituteId], references: [id])
-  subjectId   String
-  subject     Subject   @relation(fields: [subjectId], references: [id])
-  sectionId   String?
-  section     Section?  @relation(fields: [sectionId], references: [id])
+  institute   Institute     @relation(fields: [instituteId], references: [id])
+  track       AcademicTrack @default(ACADEMIC)
   teacherId   String?
-  teacher     Teacher?  @relation(fields: [teacherId], references: [id])
+  teacher     Teacher?      @relation(fields: [teacherId], references: [id])
   dayOfWeek   Int
-  startTime   String    @db.VarChar(10)
-  endTime     String    @db.VarChar(10)
-  room        String?   @db.VarChar(50)
-  createdAt   DateTime  @default(now())
+  startTime   String        @db.VarChar(10)
+  endTime     String        @db.VarChar(10)
+  room        String?       @db.VarChar(50)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @default(now()) @updatedAt
+
+  // ── ACADEMIC track only ──
+  subjectId String?
+  subject   Subject? @relation(fields: [subjectId], references: [id])
+  sectionId String?
+  section   Section? @relation(fields: [sectionId], references: [id])
+
+  // ── DEGREE track only ──
+  degreeCourseId String?
+  degreeCourse   DegreeSemesterCourse? @relation(fields: [degreeCourseId], references: [id], onDelete: Cascade)
+
+  // ── INDIVIDUAL_COURSE track only ──
+  individualCourseId String?
+  individualCourse   IndividualCourse? @relation(fields: [individualCourseId], references: [id], onDelete: Cascade)
 
   @@index([instituteId])
+  @@index([instituteId, teacherId, dayOfWeek])
+  @@index([instituteId, sectionId, dayOfWeek])
+  @@index([instituteId, degreeCourseId, dayOfWeek])
+  @@index([instituteId, individualCourseId, dayOfWeek])
 }
 
 model Assignment {
@@ -1105,42 +1113,48 @@ model FeeStructure {
 
   fees Fee[]
 
+  @@unique([instituteId, name])
   @@index([instituteId])
 }
 
+/// track mirrors the discriminator on Attendance/Result/TeacherAssignment/Timetable, though here
+/// it is derivable from which optional FK is set — kept explicit for consistent filtering/CHECK
+/// enforcement (src/services/fee.service.js is the shared primitives layer all 3 tracks build on).
 model Fee {
-  id             String       @id @default(uuid())
-  instituteId    String
-  institute      Institute    @relation(fields: [instituteId], references: [id])
-  studentId      String
-  student        Student      @relation(fields: [studentId], references: [id])
-  feeStructureId String
-  feeStructure   FeeStructure @relation(fields: [feeStructureId], references: [id])
-  amount         Decimal      @db.Decimal(10, 2)
-  fine           Decimal      @default(0) @db.Decimal(10, 2)
-  discount       Decimal      @default(0) @db.Decimal(10, 2)
-  dueDate        DateTime?    @db.Date
-  paidDate       DateTime?    @db.Date
-  status         FeeStatus    @default(PENDING)
-  receiptNumber  String?      @db.VarChar(50)
-  collectedById  String?
-  collectedBy    User?        @relation("CollectedBy", fields: [collectedById], references: [id])
-  assignmentScope FeeAssignmentScope @default(INDIVIDUAL)
-  parentFeeId    String?
-  parentFee      Fee?         @relation("FeeInstallments", fields: [parentFeeId], references: [id])
-  installments   Fee[]        @relation("FeeInstallments")
-  installmentNo  Int?
-  notes          String?
+  id                           String                      @id @default(uuid())
+  instituteId                  String
+  institute                    Institute                   @relation(fields: [instituteId], references: [id])
+  track                        AcademicTrack               @default(ACADEMIC)
+  studentId                    String
+  student                      Student                     @relation(fields: [studentId], references: [id])
+  feeStructureId               String
+  feeStructure                 FeeStructure                @relation(fields: [feeStructureId], references: [id])
+  amount                       Decimal                     @db.Decimal(10, 2)
+  fine                         Decimal                     @default(0) @db.Decimal(10, 2)
+  discount                     Decimal                     @default(0) @db.Decimal(10, 2)
+  dueDate                      DateTime?                   @db.Date
+  paidDate                     DateTime?                   @db.Date
+  status                       FeeStatus                   @default(PENDING)
+  receiptNumber                String?                     @db.VarChar(50)
+  collectedById                String?
+  collectedBy                  User?                       @relation("CollectedBy", fields: [collectedById], references: [id])
+  assignmentScope              FeeAssignmentScope          @default(INDIVIDUAL)
+  parentFeeId                  String?
+  parentFee                    Fee?                        @relation("FeeInstallments", fields: [parentFeeId], references: [id])
+  installments                 Fee[]                       @relation("FeeInstallments")
+  installmentNo                Int?
+  notes                        String?
   individualCourseEnrollmentId String?
   individualCourseEnrollment   IndividualCourseEnrollment? @relation(fields: [individualCourseEnrollmentId], references: [id], onDelete: SetNull)
   degreeStudentId              String?
-  degreeStudent                DegreeStudent? @relation(fields: [degreeStudentId], references: [id], onDelete: SetNull)
-  createdAt      DateTime     @default(now())
+  degreeStudent                DegreeStudent?              @relation(fields: [degreeStudentId], references: [id], onDelete: SetNull)
+  createdAt                    DateTime                    @default(now())
 
-  feeRequests    FeeRequest[]
+  feeRequests FeeRequest[]
 
   @@index([instituteId, studentId])
   @@index([instituteId, status])
+  @@index([instituteId, track])
   @@index([parentFeeId])
   @@index([individualCourseEnrollmentId])
   @@index([degreeStudentId])
@@ -1200,23 +1214,23 @@ model SubscriptionInvoice {
 // ─── Support & Audit ─────────────────────────────────────────────────────────
 
 model SupportTicket {
-  id          String         @id @default(uuid())
-  instituteId String
-  institute   Institute      @relation(fields: [instituteId], references: [id])
-  createdById String
-  createdBy   User           @relation("TicketCreator", fields: [createdById], references: [id])
-  subject     String         @db.VarChar(300)
-  category    TicketCategory
-  description String
-  status      TicketStatus   @default(OPEN)
-  priority    TicketPriority @default(MEDIUM)
-  escalatedToSuperAdmin Boolean @default(false)
-  escalatedAt DateTime?
-  escalatedById String?
-  escalatedBy   User?          @relation("TicketEscalator", fields: [escalatedById], references: [id])
-  closedAt    DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id                    String         @id @default(uuid())
+  instituteId           String
+  institute             Institute      @relation(fields: [instituteId], references: [id])
+  createdById           String
+  createdBy             User           @relation("TicketCreator", fields: [createdById], references: [id])
+  subject               String         @db.VarChar(300)
+  category              TicketCategory
+  description           String
+  status                TicketStatus   @default(OPEN)
+  priority              TicketPriority @default(MEDIUM)
+  escalatedToSuperAdmin Boolean        @default(false)
+  escalatedAt           DateTime?
+  escalatedById         String?
+  escalatedBy           User?          @relation("TicketEscalator", fields: [escalatedById], references: [id])
+  closedAt              DateTime?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
   replies TicketReply[]
 
@@ -1337,8 +1351,8 @@ model TransportRoute {
   stops       String[]
   createdAt   DateTime  @default(now())
 
-  routeStops  RouteStop[]
-  routeBuses  RouteBus[]
+  routeStops RouteStop[]
+  routeBuses RouteBus[]
   allotments TransportAllotment[]
 
   @@index([instituteId])
@@ -1356,6 +1370,9 @@ model TransportAllotment {
   @@index([instituteId])
 }
 
+/// System activity feed — auto-generated by the domain event pipeline (see
+/// src/events/handlers/notificationHandler.js), one row per notable action across any track.
+/// Institute-wide (admin/accountant-facing); not pushed to student/teacher/parent portals.
 model Notification {
   id          String    @id @default(uuid())
   instituteId String
@@ -1365,6 +1382,8 @@ model Notification {
   channel     String    @db.VarChar(20)
   status      String    @default("PENDING") @db.VarChar(20)
   createdAt   DateTime  @default(now())
+
+  reads NotificationRead[]
 
   @@index([instituteId])
 }
@@ -1678,16 +1697,16 @@ model Classroom {
 }
 
 model Room {
-  id          String    @id @default(uuid())
+  id          String     @id @default(uuid())
   instituteId String
-  institute   Institute @relation(fields: [instituteId], references: [id])
+  institute   Institute  @relation(fields: [instituteId], references: [id])
   classroomId String?
   classroom   Classroom? @relation(fields: [classroomId], references: [id])
-  name        String    @db.VarChar(100)
-  roomType    String    @db.VarChar(50)
+  name        String     @db.VarChar(100)
+  roomType    String     @db.VarChar(50)
   capacity    Int?
   deletedAt   DateTime?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime   @default(now())
 
   @@index([instituteId])
 }
@@ -1821,19 +1840,19 @@ model RouteBus {
 // ─── LMS / Quiz ──────────────────────────────────────────────────────────────
 
 model QuestionBank {
-  id          String    @id @default(uuid())
-  instituteId String
-  institute   Institute @relation(fields: [instituteId], references: [id])
-  subjectId   String?
-  subject     Subject?  @relation(fields: [subjectId], references: [id])
-  question    String
-  questionType String   @db.VarChar(30)
-  options     Json?
+  id            String    @id @default(uuid())
+  instituteId   String
+  institute     Institute @relation(fields: [instituteId], references: [id])
+  subjectId     String?
+  subject       Subject?  @relation(fields: [subjectId], references: [id])
+  question      String
+  questionType  String    @db.VarChar(30)
+  options       Json?
   correctAnswer Json?
-  marks       Decimal   @default(1) @db.Decimal(5, 2)
-  difficulty  String?   @db.VarChar(20)
-  deletedAt   DateTime?
-  createdAt   DateTime  @default(now())
+  marks         Decimal   @default(1) @db.Decimal(5, 2)
+  difficulty    String?   @db.VarChar(20)
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
 
   quizLinks QuizQuestion[]
 
@@ -1939,15 +1958,15 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderLine {
-  id              String        @id @default(uuid())
+  id              String         @id @default(uuid())
   purchaseOrderId String
-  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrder   PurchaseOrder  @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   inventoryItemId String?
   inventoryItem   InventoryItem? @relation(fields: [inventoryItemId], references: [id])
-  description     String        @db.VarChar(300)
+  description     String         @db.VarChar(300)
   quantity        Int
-  unitPrice       Decimal       @db.Decimal(10, 2)
-  lineTotal       Decimal       @db.Decimal(12, 2)
+  unitPrice       Decimal        @db.Decimal(10, 2)
+  lineTotal       Decimal        @db.Decimal(12, 2)
 
   @@index([purchaseOrderId])
 }
@@ -1970,18 +1989,18 @@ model InventoryTransaction {
 }
 
 model Asset {
-  id          String      @id @default(uuid())
-  instituteId String
-  institute   Institute   @relation(fields: [instituteId], references: [id])
-  tagNumber   String      @db.VarChar(50)
-  name        String      @db.VarChar(200)
-  category    String?     @db.VarChar(100)
-  status      AssetStatus @default(ACTIVE)
-  purchaseDate DateTime?  @db.Date
-  value       Decimal?    @db.Decimal(12, 2)
-  location    String?     @db.VarChar(200)
-  deletedAt   DateTime?
-  createdAt   DateTime    @default(now())
+  id           String      @id @default(uuid())
+  instituteId  String
+  institute    Institute   @relation(fields: [instituteId], references: [id])
+  tagNumber    String      @db.VarChar(50)
+  name         String      @db.VarChar(200)
+  category     String?     @db.VarChar(100)
+  status       AssetStatus @default(ACTIVE)
+  purchaseDate DateTime?   @db.Date
+  value        Decimal?    @db.Decimal(12, 2)
+  location     String?     @db.VarChar(200)
+  deletedAt    DateTime?
+  createdAt    DateTime    @default(now())
 
   maintenanceRecords MaintenanceRecord[]
 
@@ -2069,39 +2088,40 @@ model BiometricLog {
 // ─── Notifications & comms logs ──────────────────────────────────────────────
 
 model NotificationRead {
-  id             String   @id @default(uuid())
+  id             String       @id @default(uuid())
   notificationId String
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
   userId         String
-  user           User     @relation(fields: [userId], references: [id])
-  readAt         DateTime @default(now())
+  user           User         @relation(fields: [userId], references: [id])
+  readAt         DateTime     @default(now())
 
   @@unique([notificationId, userId])
 }
 
 model EmailLog {
-  id          String    @id @default(uuid())
+  id          String     @id @default(uuid())
   instituteId String?
   institute   Institute? @relation(fields: [instituteId], references: [id])
-  toEmail     String    @db.VarChar(200)
-  subject     String    @db.VarChar(300)
-  template    String?   @db.VarChar(100)
-  status      String    @db.VarChar(20)
-  providerRef String?   @db.VarChar(200)
+  toEmail     String     @db.VarChar(200)
+  subject     String     @db.VarChar(300)
+  template    String?    @db.VarChar(100)
+  status      String     @db.VarChar(20)
+  providerRef String?    @db.VarChar(200)
   error       String?
-  sentAt      DateTime  @default(now())
+  sentAt      DateTime   @default(now())
 
   @@index([instituteId, sentAt])
 }
 
 model SmsLog {
-  id          String    @id @default(uuid())
+  id          String     @id @default(uuid())
   instituteId String?
   institute   Institute? @relation(fields: [instituteId], references: [id])
-  toPhone     String    @db.VarChar(20)
+  toPhone     String     @db.VarChar(20)
   message     String
-  status      String    @db.VarChar(20)
-  providerRef String?   @db.VarChar(200)
-  sentAt      DateTime  @default(now())
+  status      String     @db.VarChar(20)
+  providerRef String?    @db.VarChar(200)
+  sentAt      DateTime   @default(now())
 
   @@index([instituteId, sentAt])
 }
@@ -2154,14 +2174,14 @@ model InstituteFeatureFlag {
 }
 
 model InstituteTheme {
-  id          String    @id @default(uuid())
-  instituteId String    @unique
-  institute   Institute @relation(fields: [instituteId], references: [id])
-  primaryColor String   @db.VarChar(20)
-  secondaryColor String? @db.VarChar(20)
-  fontFamily  String?   @db.VarChar(100)
-  customCss   String?
-  updatedAt   DateTime  @updatedAt
+  id             String    @id @default(uuid())
+  instituteId    String    @unique
+  institute      Institute @relation(fields: [instituteId], references: [id])
+  primaryColor   String    @db.VarChar(20)
+  secondaryColor String?   @db.VarChar(20)
+  fontFamily     String?   @db.VarChar(100)
+  customCss      String?
+  updatedAt      DateTime  @updatedAt
 }
 
 model InstituteBranding {
@@ -2239,19 +2259,19 @@ model ActivityStream {
 }
 
 model ApiKey {
-  id          String    @id @default(uuid())
+  id          String     @id @default(uuid())
   instituteId String?
   institute   Institute? @relation(fields: [instituteId], references: [id])
-  name        String    @db.VarChar(100)
-  keyPrefix   String    @db.VarChar(12)
-  keyHash     String    @db.VarChar(200)
+  name        String     @db.VarChar(100)
+  keyPrefix   String     @db.VarChar(12)
+  keyHash     String     @db.VarChar(200)
   scopes      String[]
   expiresAt   DateTime?
   lastUsedAt  DateTime?
   revokedAt   DateTime?
   createdById String?
-  createdBy   User?     @relation("ApiKeyCreator", fields: [createdById], references: [id])
-  createdAt   DateTime  @default(now())
+  createdBy   User?      @relation("ApiKeyCreator", fields: [createdById], references: [id])
+  createdAt   DateTime   @default(now())
 
   @@index([keyPrefix])
   @@index([instituteId])
@@ -2260,15 +2280,15 @@ model ApiKey {
 // ─── Workflow engine ───────────────────────────────────────────────────────────
 
 model WorkflowDefinition {
-  id          String       @id @default(uuid())
-  instituteId String?
-  institute   Institute?   @relation(fields: [instituteId], references: [id])
+  id           String       @id @default(uuid())
+  instituteId  String?
+  institute    Institute?   @relation(fields: [instituteId], references: [id])
   workflowType WorkflowType
-  name        String       @db.VarChar(200)
-  version     Int          @default(1)
-  isActive    Boolean      @default(true)
-  config      Json?
-  createdAt   DateTime     @default(now())
+  name         String       @db.VarChar(200)
+  version      Int          @default(1)
+  isActive     Boolean      @default(true)
+  config       Json?
+  createdAt    DateTime     @default(now())
 
   states      WorkflowState[]
   transitions WorkflowTransition[]
@@ -2305,22 +2325,22 @@ model WorkflowTransition {
 }
 
 model WorkflowInstance {
-  id           String                 @id @default(uuid())
-  instituteId  String
-  institute    Institute              @relation(fields: [instituteId], references: [id])
-  definitionId String
-  definition   WorkflowDefinition     @relation(fields: [definitionId], references: [id])
-  workflowType WorkflowType
-  entityType   String                 @db.VarChar(50)
-  entityId     String
-  currentState String                 @db.VarChar(50)
-  status       WorkflowInstanceStatus @default(IN_PROGRESS)
+  id            String                 @id @default(uuid())
+  instituteId   String
+  institute     Institute              @relation(fields: [instituteId], references: [id])
+  definitionId  String
+  definition    WorkflowDefinition     @relation(fields: [definitionId], references: [id])
+  workflowType  WorkflowType
+  entityType    String                 @db.VarChar(50)
+  entityId      String
+  currentState  String                 @db.VarChar(50)
+  status        WorkflowInstanceStatus @default(IN_PROGRESS)
   initiatedById String?
-  initiatedBy  User?                  @relation("WorkflowInitiator", fields: [initiatedById], references: [id])
-  metadata     Json?
-  createdAt    DateTime               @default(now())
-  updatedAt    DateTime               @updatedAt
-  completedAt  DateTime?
+  initiatedBy   User?                  @relation("WorkflowInitiator", fields: [initiatedById], references: [id])
+  metadata      Json?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  completedAt   DateTime?
 
   approvals WorkflowApproval[]
   auditLogs WorkflowAuditLog[]
@@ -2330,17 +2350,17 @@ model WorkflowInstance {
 }
 
 model WorkflowApproval {
-  id           String           @id @default(uuid())
-  instanceId   String
-  instance     WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-  stepKey      String           @db.VarChar(50)
-  approverId   String?
-  approver     User?            @relation("WorkflowApprover", fields: [approverId], references: [id])
-  decision     ApprovalDecision @default(PENDING)
-  comments     String?
-  decidedAt    DateTime?
-  escalatedAt  DateTime?
-  dueAt        DateTime?
+  id          String           @id @default(uuid())
+  instanceId  String
+  instance    WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  stepKey     String           @db.VarChar(50)
+  approverId  String?
+  approver    User?            @relation("WorkflowApprover", fields: [approverId], references: [id])
+  decision    ApprovalDecision @default(PENDING)
+  comments    String?
+  decidedAt   DateTime?
+  escalatedAt DateTime?
+  dueAt       DateTime?
 
   @@index([instanceId])
   @@index([approverId, decision])
@@ -2385,16 +2405,16 @@ model FormDefinition {
 }
 
 model FormField {
-  id         String        @id @default(uuid())
+  id         String         @id @default(uuid())
   formId     String
   form       FormDefinition @relation(fields: [formId], references: [id], onDelete: Cascade)
-  fieldKey   String        @db.VarChar(100)
-  label      String        @db.VarChar(200)
+  fieldKey   String         @db.VarChar(100)
+  label      String         @db.VarChar(200)
   fieldType  FormFieldType
-  required   Boolean       @default(false)
+  required   Boolean        @default(false)
   options    Json?
   validation Json?
-  sortOrder  Int           @default(0)
+  sortOrder  Int            @default(0)
   conditions Json?
 
   values FormFieldValue[]
@@ -2403,16 +2423,16 @@ model FormField {
 }
 
 model FormSubmission {
-  id          String         @id @default(uuid())
-  instituteId String
-  institute   Institute      @relation(fields: [instituteId], references: [id])
-  formId      String
-  form        FormDefinition @relation(fields: [formId], references: [id])
+  id            String         @id @default(uuid())
+  instituteId   String
+  institute     Institute      @relation(fields: [instituteId], references: [id])
+  formId        String
+  form          FormDefinition @relation(fields: [formId], references: [id])
   submittedById String?
-  submittedBy User?          @relation("FormSubmitter", fields: [submittedById], references: [id])
-  status      String         @default("SUBMITTED") @db.VarChar(20)
-  metadata    Json?
-  createdAt   DateTime       @default(now())
+  submittedBy   User?          @relation("FormSubmitter", fields: [submittedById], references: [id])
+  status        String         @default("SUBMITTED") @db.VarChar(20)
+  metadata      Json?
+  createdAt     DateTime       @default(now())
 
   values FormFieldValue[]
 
@@ -2528,15 +2548,15 @@ model UserSession {
 }
 
 model MfaDevice {
-  id          String    @id @default(uuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  method      MfaMethod
-  secretEnc   String?   @db.VarChar(500)
-  phone       String?   @db.VarChar(20)
-  isVerified  Boolean   @default(false)
-  isPrimary   Boolean   @default(false)
-  createdAt   DateTime  @default(now())
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  method     MfaMethod
+  secretEnc  String?   @db.VarChar(500)
+  phone      String?   @db.VarChar(20)
+  isVerified Boolean   @default(false)
+  isPrimary  Boolean   @default(false)
+  createdAt  DateTime  @default(now())
 
   @@index([userId])
 }
@@ -2596,46 +2616,46 @@ model DataConsent {
 }
 
 model DataRetentionPolicy {
-  id            String   @id @default(uuid())
-  entityType    String   @db.VarChar(50)
-  retentionDays Int
+  id               String   @id @default(uuid())
+  entityType       String   @db.VarChar(50)
+  retentionDays    Int
   archiveAfterDays Int?
   purgeAfterDays   Int?
-  isActive      Boolean  @default(true)
-  updatedAt     DateTime @updatedAt
+  isActive         Boolean  @default(true)
+  updatedAt        DateTime @updatedAt
 
   @@unique([entityType])
 }
 
 model DataExportRequest {
-  id          String           @id @default(uuid())
-  instituteId String
-  institute   Institute        @relation(fields: [instituteId], references: [id])
+  id            String           @id @default(uuid())
+  instituteId   String
+  institute     Institute        @relation(fields: [instituteId], references: [id])
   requestedById String
-  requestedBy User             @relation("ExportRequester", fields: [requestedById], references: [id])
-  subjectType String           @db.VarChar(30)
-  subjectId   String?
-  status      DataExportStatus @default(PENDING)
-  fileUrl     String?          @db.VarChar(500)
-  expiresAt   DateTime?
-  createdAt   DateTime         @default(now())
-  completedAt DateTime?
+  requestedBy   User             @relation("ExportRequester", fields: [requestedById], references: [id])
+  subjectType   String           @db.VarChar(30)
+  subjectId     String?
+  status        DataExportStatus @default(PENDING)
+  fileUrl       String?          @db.VarChar(500)
+  expiresAt     DateTime?
+  createdAt     DateTime         @default(now())
+  completedAt   DateTime?
 
   @@index([instituteId, status])
 }
 
 model ErasureRequest {
-  id          String        @id @default(uuid())
-  instituteId String
-  institute   Institute     @relation(fields: [instituteId], references: [id])
-  subjectType String        @db.VarChar(30)
-  subjectId   String
-  status      ErasureStatus @default(REQUESTED)
+  id            String        @id @default(uuid())
+  instituteId   String
+  institute     Institute     @relation(fields: [instituteId], references: [id])
+  subjectType   String        @db.VarChar(30)
+  subjectId     String
+  status        ErasureStatus @default(REQUESTED)
   requestedById String?
   reviewedById  String?
-  notes       String?
-  completedAt DateTime?
-  createdAt   DateTime      @default(now())
+  notes         String?
+  completedAt   DateTime?
+  createdAt     DateTime      @default(now())
 
   @@index([instituteId, status])
 }
@@ -2643,16 +2663,16 @@ model ErasureRequest {
 // ─── Analytics snapshots (materialized reporting) ──────────────────────────────
 
 model AnalyticsSnapshot {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   instituteId String
   institute   Institute @relation(fields: [instituteId], references: [id])
-  metricKey   String   @db.VarChar(100)
-  periodType  String   @db.VarChar(20)
-  periodStart DateTime @db.Date
-  periodEnd   DateTime @db.Date
+  metricKey   String    @db.VarChar(100)
+  periodType  String    @db.VarChar(20)
+  periodStart DateTime  @db.Date
+  periodEnd   DateTime  @db.Date
   dimensions  Json?
   value       Json
-  computedAt  DateTime @default(now())
+  computedAt  DateTime  @default(now())
 
   @@unique([instituteId, metricKey, periodType, periodStart])
   @@index([instituteId, metricKey, periodStart])
