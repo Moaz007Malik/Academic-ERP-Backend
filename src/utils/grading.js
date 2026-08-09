@@ -20,13 +20,13 @@ export function calculateMarks(theory, practical, internal) {
   return Math.round((t + p + i) * 100) / 100;
 }
 
-export function getGradeFromMarks(obtained, maxMarks = 100, passPercentage = 33) {
+export function getGradeFromMarks(obtained, maxMarks = 100, passPercentage = 33, scale = PAKISTANI_GRADE_SCALE) {
   const percentage = maxMarks > 0 ? (obtained / maxMarks) * 100 : 0;
   const passMarks = (maxMarks * passPercentage) / 100;
   const isPassed = obtained >= passMarks;
 
-  let gradeInfo = PAKISTANI_GRADE_SCALE[PAKISTANI_GRADE_SCALE.length - 1];
-  for (const g of PAKISTANI_GRADE_SCALE) {
+  let gradeInfo = scale[scale.length - 1];
+  for (const g of scale) {
     if (percentage >= g.min) {
       gradeInfo = g;
       break;
@@ -43,10 +43,10 @@ export function getGradeFromMarks(obtained, maxMarks = 100, passPercentage = 33)
   };
 }
 
-export function computeResult({ theoryMarks, practicalMarks, internalMarks, theoryMax = 75, practicalMax = 15, internalMax = 10, passPercentage = 33 }) {
+export function computeResult({ theoryMarks, practicalMarks, internalMarks, theoryMax = 75, practicalMax = 15, internalMax = 10, passPercentage = 33, scale }) {
   const total = calculateMarks(theoryMarks, practicalMarks, internalMarks);
   const maxMarks = theoryMax + practicalMax + internalMax;
-  const grades = getGradeFromMarks(total, maxMarks, passPercentage);
+  const grades = getGradeFromMarks(total, maxMarks, passPercentage, scale || PAKISTANI_GRADE_SCALE);
   return { ...grades, maxMarks, theoryMarks: Number(theoryMarks) || 0, practicalMarks: Number(practicalMarks) || 0, internalMarks: Number(internalMarks) || 0 };
 }
 

@@ -1,8 +1,8 @@
 import { prisma } from '../config/database.js';
 import { AppError } from '../utils/AppError.js';
-import { computeResult } from '../utils/grading.js';
+import { computeResult, PAKISTANI_GRADE_SCALE } from '../utils/grading.js';
 
-function buildComputed(entry, maxes) {
+function buildComputed(entry, maxes, scale) {
   return computeResult({
     theoryMarks: entry.theoryMarks,
     practicalMarks: entry.practicalMarks,
@@ -11,7 +11,33 @@ function buildComputed(entry, maxes) {
     practicalMax: maxes.practicalMax,
     internalMax: maxes.internalMax,
     passPercentage: maxes.passPercentage,
+    scale,
   });
+}
+
+/** Rejects negative marks or marks exceeding their component's max, before anything is persisted. */
+function validateMarks({ theoryMarks, practicalMarks, internalMarks }, maxes) {
+  const checks = [
+    ['Theory', theoryMarks, maxes.theoryMax],
+    ['Practical', practicalMarks, maxes.practicalMax],
+    ['Internal', internalMarks, maxes.internalMax],
+  ];
+  for (const [label, value, max] of checks) {
+    if (value === undefined || value === null || value === '') continue;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new AppError(`${label} marks must be a non-negative number`, 400);
+    }
+    if (max != null && n > Number(max)) {
+      throw new AppError(`${label} marks (${n}) cannot exceed the maximum (${max})`, 400);
+    }
+  }
+}
+
+/** An institute's custom grade bands (GradingPolicy.bands), or null to use PAKISTANI_GRADE_SCALE. */
+export async function resolveGradeScale(instituteId) {
+  const policy = await prisma.gradingPolicy.findUnique({ where: { instituteId } });
+  return policy?.bands || null;
 }
 
 export async function enterResult({
@@ -19,9 +45,11 @@ export async function enterResult({
   examId, subjectId,
   degreeStudentId, semesterId, degreeCourseId,
   theoryMarks, practicalMarks, internalMarks, remarks,
-  maxes, publish,
+  maxes, publish, scale,
 }) {
-  const computed = buildComputed({ theoryMarks, practicalMarks, internalMarks }, maxes);
+  validateMarks({ theoryMarks, practicalMarks, internalMarks }, maxes);
+  const effectiveScale = scale || (await resolveGradeScale(instituteId)) || PAKISTANI_GRADE_SCALE;
+  const computed = buildComputed({ theoryMarks, practicalMarks, internalMarks }, maxes, effectiveScale);
 
   if (track === 'DEGREE') {
     if (!degreeStudentId || !semesterId || !degreeCourseId) {
@@ -72,6 +100,7 @@ export async function enterResult({
 }
 
 export async function bulkEnterResults({ instituteId, track = 'ACADEMIC', entries, examId, subjectId, semesterId, degreeCourseId, maxes, publish }) {
+  const scale = (await resolveGradeScale(instituteId)) || PAKISTANI_GRADE_SCALE;
   const saved = [];
   for (const entry of entries) {
     const row = await enterResult({
@@ -80,7 +109,7 @@ export async function bulkEnterResults({ instituteId, track = 'ACADEMIC', entrie
       examId, subjectId,
       degreeStudentId: entry.degreeStudentId, semesterId, degreeCourseId,
       theoryMarks: entry.theoryMarks, practicalMarks: entry.practicalMarks, internalMarks: entry.internalMarks,
-      remarks: entry.remarks, maxes, publish,
+      remarks: entry.remarks, maxes, publish, scale,
     });
     saved.push(row);
   }

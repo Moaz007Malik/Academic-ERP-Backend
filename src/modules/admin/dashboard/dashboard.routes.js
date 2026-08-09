@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../../../config/database.js';
 import { success } from '../../../utils/response.js';
 import { isSubscriptionExpired } from '../../../utils/instituteAccess.js';
+import { getScheduleForDate } from '../../../services/timetable.service.js';
 
 const router = Router();
 
@@ -24,6 +25,7 @@ router.get('/', async (req, res, next) => {
       upcomingExams,
       institute,
       openTickets,
+      todaySchedule,
     ] = await Promise.all([
       prisma.student.count({ where: { instituteId, status: 'ACTIVE' } }),
       prisma.teacher.count({ where: { instituteId, status: 'ACTIVE' } }),
@@ -46,6 +48,7 @@ router.get('/', async (req, res, next) => {
         include: { plan: true },
       }),
       prisma.supportTicket.count({ where: { instituteId, status: 'OPEN' } }),
+      getScheduleForDate({ instituteId, date: today }),
     ]);
 
     const expired = institute ? isSubscriptionExpired(institute) : false;
@@ -58,6 +61,7 @@ router.get('/', async (req, res, next) => {
       outstandingFees: Number(outstandingFees._sum.amount || 0),
       upcomingExams,
       openTickets,
+      todaySchedule,
       subscription: institute
         ? {
             status: expired && institute.status === 'ACTIVE' ? 'EXPIRED' : institute.status,

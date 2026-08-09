@@ -16,6 +16,7 @@ import { calculateCGPA, calculateSemesterGPA } from '../../../utils/grading.js';
 import { markAttendance, getAttendanceRecords, summarizeAttendance } from '../../../services/attendance.service.js';
 import { enterResult, bulkEnterResults } from '../../../services/result.service.js';
 import { bulkSetCourseTeachers } from '../../../services/teacherAssignment.service.js';
+import { withTransactionRetry } from '../../../utils/dbRetry.js';
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.DEGREE));
@@ -303,12 +304,24 @@ router.post('/semesters/:semesterId/courses', async (req, res, next) => {
       where: { id: req.params.semesterId, instituteId },
     });
     if (!semester) throw new AppError('Semester not found', 404);
-    const { name, code, creditHours, teacherIds = [] } = req.body;
-    if (!name || !code) throw new AppError('Name and code required', 400);
+    const { courseId, name, code, creditHours, teacherIds = [] } = req.body;
 
-    const course = await prisma.degreeSemesterCourse.create({
-      data: { instituteId, semesterId: semester.id, name, code, creditHours: creditHours || 3 },
-    });
+    let data;
+    if (courseId) {
+      // Pick from Course Library — snapshot name/code/creditHours at pick-time so this row
+      // stays self-contained for existing GPA/transcript/attendance queries.
+      const libraryCourse = await prisma.courseCatalog.findFirst({ where: { id: courseId, instituteId } });
+      if (!libraryCourse) throw new AppError('Library course not found', 404);
+      data = {
+        instituteId, semesterId: semester.id, courseId: libraryCourse.id,
+        name: libraryCourse.name, code: libraryCourse.code, creditHours: libraryCourse.creditHours,
+      };
+    } else {
+      if (!name || !code) throw new AppError('Name and code required', 400);
+      data = { instituteId, semesterId: semester.id, name, code, creditHours: creditHours || 3 };
+    }
+
+    const course = await prisma.degreeSemesterCourse.create({ data });
     if (teacherIds.length) {
       await bulkSetCourseTeachers({ instituteId, track: 'DEGREE', degreeCourseId: course.id, teacherIds });
     }
@@ -455,7 +468,7 @@ router.post('/batches/:batchId/students', async (req, res, next) => {
     });
     if (!batch) throw new AppError('Batch not found', 404);
 
-    const result = await prisma.$transaction((tx) => admitDegreeStudent(tx, instituteId, batch, req.body));
+    const result = await withTransactionRetry(prisma, (tx) => admitDegreeStudent(tx, instituteId, batch, req.body));
     return success(res, result, 'Student admitted with fees', 201);
   } catch (err) { next(err); }
 });
@@ -470,7 +483,7 @@ router.post('/batches/:batchId/students/bulk', async (req, res, next) => {
     const { students = [] } = req.body;
     if (!students.length) throw new AppError('students array required', 400);
 
-    const admitted = await prisma.$transaction(async (tx) => {
+    const admitted = await withTransactionRetry(prisma, async (tx) => {
       const rows = [];
       for (const s of students) {
         rows.push(await admitDegreeStudent(tx, instituteId, batch, s));

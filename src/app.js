@@ -46,9 +46,11 @@ import enterpriseComplianceRoutes from './modules/enterprise/compliance/complian
 import teacherPortalRoutes from './modules/teacher/portal/portal.routes.js';
 import studentPortalRoutes from './modules/student/portal/portal.routes.js';
 import adminDocumentsRoutes from './modules/admin/documents/documents.routes.js';
+import adminUploadsRoutes from './modules/admin/uploads/uploads.routes.js';
 import adminCredentialsRoutes from './modules/admin/credentials/credentials.routes.js';
 import individualCoursesRoutes from './modules/admin/individualCourses/individualCourses.routes.js';
 import degreesRoutes from './modules/admin/degrees/degrees.routes.js';
+import courseLibraryRoutes from './modules/admin/courseLibrary/courseLibrary.routes.js';
 import adminTimetableRoutes from './modules/admin/timetable/timetable.routes.js';
 import adminReportsRoutes from './modules/admin/reports/reports.routes.js';
 import adminNotificationsRoutes from './modules/admin/notifications/notifications.routes.js';
@@ -139,6 +141,7 @@ api.use('/admin/settings', requireRole('INSTITUTE_ADMIN'), adminSettingsRoutes);
 api.use('/admin/credentials', requireRole('INSTITUTE_ADMIN'), adminCredentialsRoutes);
 api.use('/admin/individual-courses', requireRole('INSTITUTE_ADMIN', 'RECEPTIONIST'), individualCoursesRoutes);
 api.use('/admin/degrees', requireRole('INSTITUTE_ADMIN', 'RECEPTIONIST'), degreesRoutes);
+api.use('/admin/course-library', requireRole('INSTITUTE_ADMIN', 'RECEPTIONIST'), courseLibraryRoutes);
 api.use('/admin/idcard', requireRole('INSTITUTE_ADMIN', 'RECEPTIONIST'), adminIdCardRoutes);
 
 api.use('/admin/workflows', requireRole('INSTITUTE_ADMIN', 'PRINCIPAL', 'HR', 'ACCOUNTANT', 'RECEPTIONIST'), enterpriseWorkflowsRoutes);
@@ -146,6 +149,7 @@ api.use('/admin/forms', requireRole('INSTITUTE_ADMIN', 'RECEPTIONIST'), enterpri
 api.use('/admin/analytics', requireRole('INSTITUTE_ADMIN', 'ACCOUNTANT'), enterpriseAnalyticsRoutes);
 api.use('/admin/compliance', requireRole('INSTITUTE_ADMIN'), enterpriseComplianceRoutes);
 api.use('/admin/documents', requireRole('INSTITUTE_ADMIN', 'HR', 'RECEPTIONIST'), adminDocumentsRoutes);
+api.use('/admin/uploads', requireRole('INSTITUTE_ADMIN', 'HR', 'RECEPTIONIST', 'PRINCIPAL', 'ACCOUNTANT'), adminUploadsRoutes);
 
 api.use('/teacher', requireRole('TEACHER'), teacherPortalRoutes);
 api.use('/teacher/documents', requireRole('TEACHER'), teacherDocumentsRoutes);

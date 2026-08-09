@@ -8,30 +8,19 @@ export function assertCloudinaryReady() {
   }
 }
 
-export async function uploadPersonDocument({
-  file,
-  instituteId,
-  personType,
-  studentId,
-  teacherId,
-  category,
-  title,
-  uploadedById,
-}) {
+export async function uploadCourseDocument({ file, instituteId, courseId, category, title, uploadedById }) {
   assertCloudinaryReady();
 
-  const folder = `academic-erp/${instituteId}/${personType.toLowerCase()}`;
+  const folder = `academic-erp/${instituteId}/courses/${courseId}`;
   const result = await uploadBuffer(file.buffer, {
     folder,
     public_id: `${Date.now()}-${file.originalname.replace(/\.[^.]+$/, '').slice(0, 40)}`,
   });
 
-  const doc = await prisma.personDocument.create({
+  return prisma.courseCatalogDocument.create({
     data: {
       instituteId,
-      personType,
-      studentId: studentId || null,
-      teacherId: teacherId || null,
+      courseId,
       category: category || 'OTHER',
       title: title || file.originalname,
       fileName: file.originalname,
@@ -42,11 +31,9 @@ export async function uploadPersonDocument({
       uploadedById: uploadedById || null,
     },
   });
-
-  return doc;
 }
 
-export async function deletePersonDocument(doc, instituteId) {
+export async function deleteCourseDocument(doc, instituteId) {
   if (doc.instituteId !== instituteId) {
     throw new AppError('Document not found', 404);
   }
@@ -56,16 +43,12 @@ export async function deletePersonDocument(doc, instituteId) {
   } catch {
     // continue DB delete if Cloudinary asset already removed
   }
-  await prisma.personDocument.delete({ where: { id: doc.id } });
+  await prisma.courseCatalogDocument.delete({ where: { id: doc.id } });
 }
 
-export async function listPersonDocuments({ instituteId, studentId, teacherId }) {
-  const where = { instituteId };
-  if (studentId) where.studentId = studentId;
-  if (teacherId) where.teacherId = teacherId;
-
-  return prisma.personDocument.findMany({
-    where,
+export async function listCourseDocuments({ instituteId, courseId }) {
+  return prisma.courseCatalogDocument.findMany({
+    where: { instituteId, courseId },
     orderBy: { createdAt: 'desc' },
     include: {
       uploadedBy: { select: { firstName: true, lastName: true, email: true } },

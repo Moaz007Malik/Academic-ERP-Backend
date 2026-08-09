@@ -10,6 +10,7 @@ import { AppError } from '../../../utils/AppError.js';
 import { assignIndividualCourseFees, calculateEnrollmentFeeDue } from '../../../services/individualCourseFee.service.js';
 import { assignTeacher } from '../../../services/teacherAssignment.service.js';
 import { markAttendance, getAttendanceRecords } from '../../../services/attendance.service.js';
+import { withTransactionRetry } from '../../../utils/dbRetry.js';
 
 function withTeachersAlias(course) {
   if (!course) return course;
@@ -189,7 +190,7 @@ router.post('/:id/enroll', async (req, res, next) => {
     });
     if (enrollmentCount >= course.capacity) throw new AppError('Course capacity is full', 400);
 
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await withTransactionRetry(prisma, async (tx) => {
       let sid = studentId;
       if (!sid && newStudent) {
         const {

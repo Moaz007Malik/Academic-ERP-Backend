@@ -116,6 +116,121 @@ export async function removeSlot({ instituteId, id }) {
   return existing;
 }
 
+/** App-wide day-of-week convention is 1=Monday..7=Sunday (see frontend DAYS arrays in
+ * TimetablePage.jsx / Timetable.jsx) — JS's native Date#getUTCDay() is 0=Sunday..6=Saturday.
+ * Uses UTC throughout (paired with toDateOnly below) so this doesn't shift by a day depending
+ * on the server's local timezone offset. */
+function jsDateToAppDay(date) {
+  const jsDay = date.getUTCDay();
+  return jsDay === 0 ? 7 : jsDay;
+}
+
+/** Normalizes to UTC midnight of the given date's UTC calendar day. Deliberately uses the UTC
+ * accessors rather than their local-time equivalents — a plain `setHours(0,0,0,0)` shifts the
+ * result onto the previous day once the server's local offset is positive (e.g. a "2026-08-10"
+ * input, parsed as UTC midnight, becomes local 05:00 in UTC+5, and zeroing the local hours then
+ * rewinds it to 2026-08-09T19:00:00Z). */
+function toDateOnly(date) {
+  const d = new Date(date);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+/** Assigns (or replaces) the substitute teacher for one recurring slot on one specific date.
+ * Rejects a substitute who's already effectively teaching an overlapping slot that same date
+ * (checking both other slots' permanent teacher and their own active substitutions). */
+export async function assignSubstitute({ instituteId, timetableId, date, substituteTeacherId, reason, createdById }) {
+  if (!substituteTeacherId) throw new AppError('substituteTeacherId is required', 400);
+  const slot = await prisma.timetable.findFirst({ where: { id: timetableId, instituteId } });
+  if (!slot) throw new AppError('Timetable slot not found', 404);
+
+  const dateOnly = toDateOnly(date);
+  if (jsDateToAppDay(dateOnly) !== slot.dayOfWeek) {
+    throw new AppError('The selected date does not fall on this slot\'s day of week', 400);
+  }
+
+  const daySlots = await prisma.timetable.findMany({
+    where: { instituteId, dayOfWeek: slot.dayOfWeek, id: { not: slot.id } },
+    include: { teacher: true, substitutions: { where: { date: dateOnly }, include: { substituteTeacher: true } } },
+  });
+  for (const other of daySlots) {
+    const effectiveTeacherId = other.substitutions[0]?.substituteTeacherId || other.teacherId;
+    if (effectiveTeacherId === substituteTeacherId && rangesOverlap(slot.startTime, slot.endTime, other.startTime, other.endTime)) {
+      const name = other.substitutions[0]?.substituteTeacher
+        ? `${other.substitutions[0].substituteTeacher.firstName} ${other.substitutions[0].substituteTeacher.lastName}`
+        : `${other.teacher?.firstName || ''} ${other.teacher?.lastName || ''}`.trim();
+      throw new AppError(`${name || 'This teacher'} is already booked ${other.startTime}-${other.endTime} on this date`, 409);
+    }
+  }
+
+  return prisma.timetableSubstitution.upsert({
+    where: { timetableId_date: { timetableId: slot.id, date: dateOnly } },
+    create: { instituteId, timetableId: slot.id, date: dateOnly, substituteTeacherId, reason: reason || null, createdById },
+    update: { substituteTeacherId, reason: reason || null, createdById },
+    include: { substituteTeacher: true },
+  });
+}
+
+export async function removeSubstitute({ instituteId, timetableId, date }) {
+  await prisma.timetableSubstitution.deleteMany({
+    where: { instituteId, timetableId, date: toDateOnly(date) },
+  });
+}
+
+/** Resolves who actually teaches a slot on a given date — the day's substitute if one is
+ * assigned, otherwise the slot's permanent teacher. */
+export async function getEffectiveTeacher({ instituteId, timetableId, date }) {
+  const slot = await prisma.timetable.findFirst({ where: { id: timetableId, instituteId }, include: { teacher: true } });
+  if (!slot) return null;
+  const sub = await prisma.timetableSubstitution.findUnique({
+    where: { timetableId_date: { timetableId, date: toDateOnly(date) } },
+    include: { substituteTeacher: true },
+  });
+  if (sub) return { teacherId: sub.substituteTeacherId, teacher: sub.substituteTeacher, isSubstitute: true, reason: sub.reason };
+  return { teacherId: slot.teacherId, teacher: slot.teacher, isSubstitute: false };
+}
+
+/** A single calendar date's schedule (used for "today's schedule" dashboard widgets), each slot
+ * annotated with its effective teacher for that date. When `teacherId` is passed, matches slots
+ * where that teacher is the effective teacher — including ones they're only substituting for
+ * that day, which a plain `where: { teacherId }` filter would miss. */
+export async function getScheduleForDate({ instituteId, date, teacherId, sectionId, degreeCourseId, individualCourseId }) {
+  const dateOnly = toDateOnly(date);
+  const appDay = jsDateToAppDay(dateOnly);
+
+  const slots = await prisma.timetable.findMany({
+    where: {
+      instituteId,
+      dayOfWeek: appDay,
+      ...(sectionId && { sectionId }),
+      ...(degreeCourseId && { degreeCourseId }),
+      ...(individualCourseId && { individualCourseId }),
+    },
+    include: {
+      subject: true,
+      section: { include: { batch: true } },
+      teacher: true,
+      degreeCourse: { include: { semester: true } },
+      individualCourse: true,
+      substitutions: { where: { date: dateOnly }, include: { substituteTeacher: true } },
+    },
+    orderBy: { startTime: 'asc' },
+  });
+
+  const withEffectiveTeacher = slots.map((s) => {
+    const sub = s.substitutions[0];
+    return {
+      ...s,
+      effectiveTeacher: sub ? sub.substituteTeacher : s.teacher,
+      isSubstitute: !!sub,
+      substituteReason: sub?.reason || null,
+    };
+  });
+
+  return teacherId
+    ? withEffectiveTeacher.filter((s) => s.effectiveTeacher?.id === teacherId)
+    : withEffectiveTeacher;
+}
+
 export async function getTimetable({ instituteId, track, sectionId, degreeCourseId, individualCourseId, teacherId }) {
   const where = { instituteId };
   if (track) where.track = track;

@@ -6,6 +6,8 @@ import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { calculateCGPA, calculateSemesterGPA } from '../../../utils/grading.js';
 import { AppError } from '../../../utils/AppError.js';
+import { renderFeeReceiptPdf } from '../../../services/feeReceiptPdf.service.js';
+import { getScheduleForDate } from '../../../services/timetable.service.js';
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.STUDENT_PORTAL));
@@ -69,6 +71,25 @@ router.get('/dashboard', async (req, res, next) => {
       }),
     ]);
 
+    const today = new Date();
+    const primaryDegreeForSchedule = student.degreeStudents?.[0];
+    const [academicSchedule, degreeSchedule, individualCourseSchedule] = await Promise.all([
+      student.currentSectionId
+        ? getScheduleForDate({ instituteId, date: today, sectionId: student.currentSectionId })
+        : [],
+      primaryDegreeForSchedule
+        ? prisma.degreeSemesterCourse.findMany({
+            where: { semester: { batchId: primaryDegreeForSchedule.batchId, number: primaryDegreeForSchedule.currentSemesterNumber } },
+            select: { id: true },
+          }).then((courses) => Promise.all(courses.map((c) => getScheduleForDate({ instituteId, date: today, degreeCourseId: c.id })))).then((r) => r.flat())
+        : [],
+      (student.courseEnrollments || []).length
+        ? Promise.all(student.courseEnrollments.map((e) => getScheduleForDate({ instituteId, date: today, individualCourseId: e.courseId }))).then((r) => r.flat())
+        : [],
+    ]);
+    const todaySchedule = [...academicSchedule, ...degreeSchedule, ...individualCourseSchedule]
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
     const allAttendance = [...academicAttendance, ...degreeAttendance, ...individualCourseAttendance];
     const primaryDegree = student.degreeStudents?.[0];
 
@@ -111,6 +132,7 @@ router.get('/dashboard', async (req, res, next) => {
       },
       recentResults,
       recentDegreeResults: degreeResults,
+      todaySchedule,
     });
   } catch (err) { next(err); }
 });
@@ -186,6 +208,74 @@ router.get('/results', async (req, res, next) => {
       cgpa,
       degreeCgpa,
     });
+  } catch (err) { next(err); }
+});
+
+router.get('/courses', async (req, res, next) => {
+  try {
+    const student = await getStudent(req);
+    const primaryDegree = student.degreeStudents?.[0];
+
+    let degreeCourses = [];
+    if (primaryDegree) {
+      const semester = await prisma.degreeSemester.findFirst({
+        where: { batchId: primaryDegree.batchId, number: primaryDegree.currentSemesterNumber },
+      });
+      if (semester) {
+        degreeCourses = await prisma.degreeSemesterCourse.findMany({
+          where: { semesterId: semester.id },
+          include: {
+            teacherAssignments: { include: { teacher: { select: { firstName: true, lastName: true } } } },
+            course: { select: { id: true, _count: { select: { documents: true } } } },
+          },
+          orderBy: { name: 'asc' },
+        });
+      }
+    }
+
+    const individualCourses = (student.courseEnrollments || []).map((e) => ({
+      enrollmentId: e.id,
+      courseId: e.courseId,
+      courseName: e.course?.name,
+      courseCode: e.course?.code,
+      status: e.status,
+    }));
+
+    return success(res, {
+      degreeCourses: degreeCourses.map((c) => ({
+        id: c.id,
+        name: c.name,
+        code: c.code,
+        creditHours: c.creditHours,
+        teachers: c.teacherAssignments.map((t) => `${t.teacher.firstName} ${t.teacher.lastName}`),
+        hasLibraryDocuments: !!c.course && c.course._count.documents > 0,
+      })),
+      individualCourses,
+    });
+  } catch (err) { next(err); }
+});
+
+router.get('/courses/:degreeCourseId/documents', async (req, res, next) => {
+  try {
+    const student = await getStudent(req);
+    const primaryDegree = student.degreeStudents?.[0];
+    if (!primaryDegree) throw new AppError('Not enrolled in a degree program', 403);
+
+    const degreeCourse = await prisma.degreeSemesterCourse.findFirst({
+      where: { id: req.params.degreeCourseId, instituteId: req.user.instituteId },
+      include: { semester: true },
+    });
+    if (!degreeCourse || degreeCourse.semester.batchId !== primaryDegree.batchId) {
+      throw new AppError('Course not found', 404);
+    }
+    if (!degreeCourse.courseId) return success(res, []);
+
+    const docs = await prisma.courseCatalogDocument.findMany({
+      where: { instituteId: req.user.instituteId, courseId: degreeCourse.courseId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, category: true, title: true, fileName: true, fileSize: true, url: true, createdAt: true },
+    });
+    return success(res, docs);
   } catch (err) { next(err); }
 });
 
@@ -286,6 +376,32 @@ router.get('/fees', async (req, res, next) => {
         .reduce((s, i) => s + Number(i.amount) - Number(i.discount || 0), 0),
     }));
     return success(res, { fees, pending, paid, history: paid, installmentPlans });
+  } catch (err) { next(err); }
+});
+
+router.get('/fees/:id/receipt.pdf', async (req, res, next) => {
+  try {
+    const student = await getStudent(req);
+    const fee = await prisma.fee.findFirst({
+      where: { id: req.params.id, studentId: student.id, instituteId: req.user.instituteId, status: 'PAID' },
+      include: {
+        student: true,
+        feeStructure: true,
+        collectedBy: { select: { firstName: true, lastName: true } },
+        degreeStudent: { include: { batch: { include: { degree: true } } } },
+      },
+    });
+    if (!fee) throw new AppError('Paid fee not found', 404);
+
+    const institute = await prisma.institute.findUnique({ where: { id: req.user.instituteId } });
+    await renderFeeReceiptPdf(res, {
+      fee, student: fee.student, institute,
+      collectedByName: fee.collectedBy ? `${fee.collectedBy.firstName} ${fee.collectedBy.lastName}` : null,
+      degreeInfo: fee.degreeStudent ? {
+        degreeName: fee.degreeStudent.batch?.degree?.name,
+        semesterNumber: fee.degreeStudent.currentSemesterNumber,
+      } : null,
+    });
   } catch (err) { next(err); }
 });
 

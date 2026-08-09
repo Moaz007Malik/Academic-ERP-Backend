@@ -110,7 +110,7 @@ router.post('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) =>
   try {
     const {
       firstName, lastName, email, password, rollNumber,
-      dateOfBirth, gender, cnic, phone, address, photo,
+      dateOfBirth, gender, cnic, phone, address, photo, photoCloudinaryId,
       guardianName, guardianPhone, guardianRelation, guardianEmail,
       fatherName, motherName, bloodGroup, admissionNumber, registrationNumber, notes,
       currentBatchId, currentSectionId,
@@ -171,6 +171,7 @@ router.post('/', requirePermission('MANAGE_STUDENTS'), async (req, res, next) =>
           phone: phone || null,
           address: address || null,
           photo: photo || null,
+          photoCloudinaryId: photoCloudinaryId || null,
           guardianName: guardianName || null,
           guardianPhone: guardianPhone || null,
           guardianRelation: guardianRelation || null,
@@ -256,10 +257,17 @@ router.put('/:id', requirePermission('MANAGE_STUDENTS'), async (req, res, next) 
 
     const {
       firstName, lastName, rollNumber, dateOfBirth, gender, cnic, phone, address,
+      photo, photoCloudinaryId,
       guardianName, guardianPhone, currentBatchId, currentSectionId, status,
       registrationNumber, admissionNumber, bloodGroup, fatherName, motherName,
       guardianRelation, guardianEmail, notes,
     } = req.body;
+
+    if (photoCloudinaryId !== undefined && existing.photoCloudinaryId
+      && existing.photoCloudinaryId !== photoCloudinaryId) {
+      const { deleteCloudinaryAsset } = await import('../../config/cloudinary.js');
+      await deleteCloudinaryAsset(existing.photoCloudinaryId, 'image').catch(() => {});
+    }
 
     if (rollNumber && rollNumber !== existing.rollNumber) {
       const dup = await prisma.student.findFirst({
@@ -279,6 +287,8 @@ router.put('/:id', requirePermission('MANAGE_STUDENTS'), async (req, res, next) 
         ...(cnic !== undefined && { cnic }),
         ...(phone !== undefined && { phone }),
         ...(address !== undefined && { address }),
+        ...(photo !== undefined && { photo }),
+        ...(photoCloudinaryId !== undefined && { photoCloudinaryId }),
         ...(guardianName !== undefined && { guardianName }),
         ...(guardianPhone !== undefined && { guardianPhone }),
         ...(registrationNumber !== undefined && { registrationNumber }),

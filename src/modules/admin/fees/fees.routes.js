@@ -5,7 +5,9 @@ import { requireModule } from '../../../middleware/moduleGuard.js';
 import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
 import { AppError } from '../../../utils/AppError.js';
-import { createInstallments } from '../../../services/fee.service.js';
+import { createInstallments, generateReceiptNumber } from '../../../services/fee.service.js';
+import { renderFeeReceiptPdf } from '../../../services/feeReceiptPdf.service.js';
+import { withTransactionRetry } from '../../../utils/dbRetry.js';
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.FEES_FINANCE));
@@ -286,32 +288,43 @@ router.post('/:id/collect', async (req, res, next) => {
     });
     if (!fee) throw new AppError('Fee not found', 404);
 
-    const receiptNumber = `RCP-${Date.now()}`;
+    const { paymentMethod, transactionId } = req.body;
+    const validMethods = ['CASH', 'BANK_TRANSFER', 'CARD', 'ONLINE', 'CHEQUE'];
     const payable = Math.max(0, Number(fee.amount || 0) + Number(req.body.fine ?? fee.fine ?? 0) - Number(fee.discount || 0));
-    const updated = await prisma.fee.update({
-      where: { id: fee.id },
-      data: {
-        status: 'PAID',
-        paidDate: new Date(),
-        receiptNumber,
-        collectedById: req.user.id,
-        fine: req.body.fine ?? fee.fine,
-      },
-      include: { student: true, feeStructure: true },
-    });
+    let receiptNumber;
+    const updated = await withTransactionRetry(prisma, async (tx) => {
+      const institute = await tx.institute.findUnique({ where: { id: req.user.instituteId }, select: { instituteCode: true } });
+      receiptNumber = await generateReceiptNumber(tx, { instituteId: req.user.instituteId, instituteCode: institute.instituteCode });
 
-    if (fee.track === 'INDIVIDUAL_COURSE' && fee.individualCourseEnrollmentId) {
-      const enrollment = await prisma.individualCourseEnrollment.findUnique({
-        where: { id: fee.individualCourseEnrollmentId }, select: { feeDue: true },
-      });
-      await prisma.individualCourseEnrollment.update({
-        where: { id: fee.individualCourseEnrollmentId },
+      const result = await tx.fee.update({
+        where: { id: fee.id },
         data: {
-          feePaid: { increment: payable },
-          feeDue: Math.max(0, Number(enrollment.feeDue) - payable),
+          status: 'PAID',
+          paidDate: new Date(),
+          receiptNumber,
+          collectedById: req.user.id,
+          fine: req.body.fine ?? fee.fine,
+          ...(validMethods.includes(paymentMethod) && { paymentMethod }),
+          ...(transactionId !== undefined && { transactionId: transactionId || null }),
         },
+        include: { student: true, feeStructure: true },
       });
-    }
+
+      if (fee.track === 'INDIVIDUAL_COURSE' && fee.individualCourseEnrollmentId) {
+        const enrollment = await tx.individualCourseEnrollment.findUnique({
+          where: { id: fee.individualCourseEnrollmentId }, select: { feeDue: true },
+        });
+        await tx.individualCourseEnrollment.update({
+          where: { id: fee.individualCourseEnrollmentId },
+          data: {
+            feePaid: { increment: payable },
+            feeDue: Math.max(0, Number(enrollment.feeDue) - payable),
+          },
+        });
+      }
+
+      return result;
+    });
 
     const { events } = await import('../../../events/eventBus.js');
     await events.feeCollected({
@@ -331,6 +344,31 @@ router.post('/:id/collect', async (req, res, next) => {
     });
 
     return success(res, updated, 'Fee collected');
+  } catch (err) { next(err); }
+});
+
+router.get('/:id/receipt.pdf', async (req, res, next) => {
+  try {
+    const fee = await prisma.fee.findFirst({
+      where: { id: req.params.id, instituteId: req.user.instituteId, status: 'PAID' },
+      include: {
+        student: true,
+        feeStructure: true,
+        collectedBy: { select: { firstName: true, lastName: true } },
+        degreeStudent: { include: { batch: { include: { degree: true } } } },
+      },
+    });
+    if (!fee) throw new AppError('Paid fee not found', 404);
+
+    const institute = await prisma.institute.findUnique({ where: { id: req.user.instituteId } });
+    await renderFeeReceiptPdf(res, {
+      fee, student: fee.student, institute,
+      collectedByName: fee.collectedBy ? `${fee.collectedBy.firstName} ${fee.collectedBy.lastName}` : null,
+      degreeInfo: fee.degreeStudent ? {
+        degreeName: fee.degreeStudent.batch?.degree?.name,
+        semesterNumber: fee.degreeStudent.currentSemesterNumber,
+      } : null,
+    });
   } catch (err) { next(err); }
 });
 

@@ -28,8 +28,10 @@ export function uploadBuffer(buffer, options = {}) {
   });
 }
 
-export async function deleteCloudinaryAsset(publicId) {
-  return cloudinary.uploader.destroy(publicId, { resource_type: 'auto' });
+// Cloudinary's destroy API (unlike upload) rejects resource_type: 'auto' — it must be
+// one of image/video/raw, resolved by the caller from what was actually uploaded.
+export async function deleteCloudinaryAsset(publicId, resourceType = 'image') {
+  return cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
 }
 
 export { cloudinary };

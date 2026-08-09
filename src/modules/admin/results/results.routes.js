@@ -4,9 +4,9 @@ import { success } from '../../../utils/response.js';
 import { requireModule } from '../../../middleware/moduleGuard.js';
 import { MODULE_KEYS } from '../../../utils/constants.js';
 import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.js';
-import { calculateCGPA } from '../../../utils/grading.js';
+import { calculateCGPA, PAKISTANI_GRADE_SCALE } from '../../../utils/grading.js';
 import { AppError } from '../../../utils/AppError.js';
-import { enterResult, bulkEnterResults, getStudentResults } from '../../../services/result.service.js';
+import { enterResult, bulkEnterResults, getStudentResults, resolveGradeScale } from '../../../services/result.service.js';
 import { requirePermission } from '../../../middleware/rbac.js';
 
 const router = Router();
@@ -29,7 +29,8 @@ router.get('/exam/:examId', async (req, res, next) => {
       },
       orderBy: [{ student: { rollNumber: 'asc' } }, { subject: { name: 'asc' } }],
     });
-    return success(res, { exam, results });
+    const gradeScale = (await resolveGradeScale(req.user.instituteId)) || PAKISTANI_GRADE_SCALE;
+    return success(res, { exam, results, gradeScale });
   } catch (err) { next(err); }
 });
 

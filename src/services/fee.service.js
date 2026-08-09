@@ -20,6 +20,22 @@ export async function getOrCreateFeeStructure(tx, { instituteId, name, amount, f
   }
 }
 
+/** Atomically issues the next sequential receipt number for an institute, formatted
+ * `RCP-{instituteCode}-{year}-{paddedCounter}`. Uses InstituteCounter's unique (instituteId,
+ * counterType) row as an atomic increment — must be called inside the same transaction as the
+ * Fee update it's stamped onto, to avoid a gap if the surrounding transaction later fails. */
+export async function generateReceiptNumber(tx, { instituteId, instituteCode }) {
+  const year = new Date().getFullYear();
+  const counterType = `RECEIPT_${year}`;
+  const counter = await tx.instituteCounter.upsert({
+    where: { instituteId_counterType: { instituteId, counterType } },
+    create: { instituteId, counterType, value: 1 },
+    update: { value: { increment: 1 } },
+  });
+  const padded = String(counter.value).padStart(5, '0');
+  return `RCP-${instituteCode}-${year}-${padded}`;
+}
+
 /** Splits a Fee into 1-6 installment child rows (self-referencing via parentFeeId), carrying
  * the parent's track/scope FKs forward so each installment stays correctly attributed. */
 export async function createInstallments(tx, { instituteId, parentFee, installmentCount, firstDueDate }) {

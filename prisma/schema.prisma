@@ -83,6 +83,14 @@ enum FeeStatus {
   WAIVED
 }
 
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CARD
+  ONLINE
+  CHEQUE
+}
+
 enum FeeAssignmentScope {
   ALL_STUDENTS
   BATCH
@@ -246,6 +254,8 @@ model Institute {
   auditLogs             AuditLog[]
   subscriptionInvoices  SubscriptionInvoice[]
   individualCourses     IndividualCourse[]
+  courseCatalogs        CourseCatalog[]
+  courseCatalogDocuments CourseCatalogDocument[]
   degrees               Degree[]
   degreeBatches         DegreeBatch[]
   degreeSemesters       DegreeSemester[]
@@ -254,6 +264,9 @@ model Institute {
   teacherAssignments    TeacherAssignment[]
   personDocuments       PersonDocument[]
   feeRequests           FeeRequest[]
+  gradingPolicy         GradingPolicy?
+  instituteCounters     InstituteCounter[]
+  timetableSubstitutions TimetableSubstitution[]
   // Enterprise relations
   guardians             Guardian[]
   parentStudentLinks    ParentStudentLink[]
@@ -339,6 +352,8 @@ model User {
   leaveRequests              LeaveRequest[]
   assignments                Assignment[]
   documentsUploaded          PersonDocument[]       @relation("UploadedBy")
+  courseDocumentsUploaded    CourseCatalogDocument[] @relation("CourseDocUploadedBy")
+  substitutionsCreated       TimetableSubstitution[] @relation("SubstitutionCreatedBy")
   guardianProfile            Guardian?
   notificationReads          NotificationRead[]
   inventoryTxns              InventoryTransaction[] @relation("InventoryTxnBy")
@@ -530,6 +545,7 @@ model Student {
   phone                   String?       @db.VarChar(20)
   address                 String?
   photo                   String?       @db.VarChar(500)
+  photoCloudinaryId       String?       @db.VarChar(300)
   guardianName            String?       @db.VarChar(200)
   guardianPhone           String?       @db.VarChar(20)
   guardianRelation        String?       @db.VarChar(50)
@@ -609,11 +625,12 @@ model Teacher {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  timetable     Timetable[]
-  salaries      Salary[]
-  leaveRequests LeaveRequest[]
-  assignments   TeacherAssignment[]
-  documents     PersonDocument[]
+  timetable      Timetable[]
+  salaries       Salary[]
+  leaveRequests  LeaveRequest[]
+  assignments    TeacherAssignment[]
+  documents      PersonDocument[]
+  substitutions  TimetableSubstitution[]
 
   @@index([instituteId])
 }
@@ -713,6 +730,70 @@ model IndividualCourseEnrollment {
   @@index([instituteId])
 }
 
+// ─── Course Library (reusable catalog, distinct from the legacy per-department
+// `Course` model above and from `DegreeSemesterCourse`, which snapshots name/code/
+// creditHours from here at pick-time so existing GPA/transcript queries are unaffected) ──────
+
+enum CourseCatalogType {
+  THEORY
+  PRACTICAL
+  THEORY_PRACTICAL
+}
+
+enum CourseCatalogStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CourseCatalogDocCategory {
+  SYLLABUS
+  NOTES
+  OUTLINE
+  ASSIGNMENT
+  LAB_MANUAL
+  OTHER
+}
+
+model CourseCatalog {
+  id          String              @id @default(uuid())
+  instituteId String
+  institute   Institute           @relation(fields: [instituteId], references: [id])
+  code        String              @db.VarChar(50)
+  name        String              @db.VarChar(200)
+  creditHours Int                 @default(3)
+  courseType  CourseCatalogType   @default(THEORY)
+  description String?
+  status      CourseCatalogStatus @default(ACTIVE)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  documents      CourseCatalogDocument[]
+  degreeSemesterCourses DegreeSemesterCourse[]
+
+  @@unique([instituteId, code])
+  @@index([instituteId, status])
+}
+
+model CourseCatalogDocument {
+  id           String                    @id @default(uuid())
+  instituteId  String
+  institute    Institute                 @relation(fields: [instituteId], references: [id])
+  courseId     String
+  course       CourseCatalog             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  category     CourseCatalogDocCategory  @default(OTHER)
+  title        String                    @db.VarChar(200)
+  fileName     String                    @db.VarChar(300)
+  mimeType     String?                   @db.VarChar(100)
+  fileSize     Int?
+  cloudinaryId String                    @db.VarChar(300)
+  url          String                    @db.VarChar(500)
+  uploadedById String?
+  uploadedBy   User?                     @relation("CourseDocUploadedBy", fields: [uploadedById], references: [id])
+  createdAt    DateTime                  @default(now())
+
+  @@index([instituteId, courseId])
+}
+
 // ─── Degree Programs (independent from classes) ──────────────────────────────
 
 enum DegreeProgramStatus {
@@ -807,6 +888,11 @@ model DegreeSemesterCourse {
   name        String         @db.VarChar(200)
   code        String         @db.VarChar(50)
   creditHours Int            @default(3)
+  /// Set when this semester course was picked from the Course Library — name/code/creditHours
+  /// above remain a snapshot copied at pick-time so GPA/transcript/attendance/timetable queries
+  /// that already read this row's own scalar fields are unaffected.
+  courseId    String?
+  course      CourseCatalog? @relation(fields: [courseId], references: [id], onDelete: SetNull)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
@@ -1059,11 +1145,35 @@ model Timetable {
   individualCourseId String?
   individualCourse   IndividualCourse? @relation(fields: [individualCourseId], references: [id], onDelete: Cascade)
 
+  substitutions TimetableSubstitution[]
+
   @@index([instituteId])
   @@index([instituteId, teacherId, dayOfWeek])
   @@index([instituteId, sectionId, dayOfWeek])
   @@index([instituteId, degreeCourseId, dayOfWeek])
   @@index([instituteId, individualCourseId, dayOfWeek])
+}
+
+/// A per-calendar-date override of a recurring Timetable slot's teacher — Timetable itself has no
+/// `date` column (weekly-recurring only), so this is a small dated side-table rather than a
+/// same-row override, letting a slot have independent substitutes on different future dates.
+model TimetableSubstitution {
+  id                  String    @id @default(uuid())
+  instituteId         String
+  institute           Institute @relation(fields: [instituteId], references: [id])
+  timetableId         String
+  timetable           Timetable @relation(fields: [timetableId], references: [id], onDelete: Cascade)
+  date                DateTime  @db.Date
+  substituteTeacherId String
+  substituteTeacher   Teacher   @relation(fields: [substituteTeacherId], references: [id])
+  reason              String?
+  createdById         String?
+  createdBy           User?     @relation("SubstitutionCreatedBy", fields: [createdById], references: [id])
+  createdAt           DateTime  @default(now())
+
+  @@unique([timetableId, date])
+  @@index([instituteId, date])
+  @@index([instituteId, substituteTeacherId, date])
 }
 
 model Assignment {
@@ -1136,6 +1246,8 @@ model Fee {
   paidDate                     DateTime?                   @db.Date
   status                       FeeStatus                   @default(PENDING)
   receiptNumber                String?                     @db.VarChar(50)
+  paymentMethod                PaymentMethod?
+  transactionId                String?                     @db.VarChar(100)
   collectedById                String?
   collectedBy                  User?                       @relation("CollectedBy", fields: [collectedById], references: [id])
   assignmentScope              FeeAssignmentScope          @default(INDIVIDUAL)
@@ -1183,6 +1295,32 @@ model FeeRequest {
 
   @@index([instituteId, status])
   @@index([studentId])
+}
+
+/// Atomic per-institute, per-purpose running counter (e.g. receipt numbers) — incremented inside
+/// a transaction via `update({ data: { value: { increment: 1 } } })` so concurrent collections
+/// never race on the same number, unlike the old `RCP-${Date.now()}` scheme.
+model InstituteCounter {
+  id          String   @id @default(uuid())
+  instituteId String
+  institute   Institute @relation(fields: [instituteId], references: [id])
+  counterType String    @db.VarChar(50)
+  value       Int       @default(0)
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([instituteId, counterType])
+}
+
+/// Optional per-institute override of the default PAKISTANI_GRADE_SCALE (src/utils/grading.js).
+/// `bands` mirrors that constant's shape: [{ min, grade, points, division }, ...], highest min first.
+/// Absent for an institute = the hardcoded default scale applies, unchanged from today's behavior.
+model GradingPolicy {
+  id          String    @id @default(uuid())
+  instituteId String    @unique
+  institute   Institute @relation(fields: [instituteId], references: [id])
+  bands       Json
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model SubscriptionInvoice {

@@ -7,7 +7,9 @@ import { blockExpiredModuleAccess } from '../../../middleware/subscriptionGuard.
 import { AppError } from '../../../utils/AppError.js';
 import { expandAcademicAssignmentsToSections } from '../../../services/teacherAssignment.service.js';
 import { markAttendance } from '../../../services/attendance.service.js';
-import { computeResult } from '../../../utils/grading.js';
+import { bulkEnterResults, resolveGradeScale } from '../../../services/result.service.js';
+import { PAKISTANI_GRADE_SCALE } from '../../../utils/grading.js';
+import { getScheduleForDate, getEffectiveTeacher } from '../../../services/timetable.service.js';
 
 const router = Router();
 router.use(requireModule(MODULE_KEYS.TEACHER_PORTAL));
@@ -58,6 +60,7 @@ router.get('/dashboard', async (req, res, next) => {
       take: 5,
       orderBy: { startDate: 'asc' },
     });
+    const todaySchedule = await getScheduleForDate({ instituteId: req.user.instituteId, date: new Date(), teacherId: teacher.id });
     return success(res, {
       teacher: { id: teacher.id, firstName: teacher.firstName, lastName: teacher.lastName, employeeCode: teacher.employeeCode },
       assignments: teacher.academicAssignments,
@@ -71,6 +74,7 @@ router.get('/dashboard', async (req, res, next) => {
         degreeCoursesCount: teacher.degreeCourseAssignments.length,
       },
       upcomingExams,
+      todaySchedule,
     });
   } catch (err) { next(err); }
 });
@@ -98,9 +102,20 @@ router.get('/classes', async (req, res, next) => {
 router.get('/students', async (req, res, next) => {
   try {
     const teacher = await getTeacher(req);
-    const sectionIds = [...new Set(teacher.expandedClasses.map((c) => c.sectionId))];
+    const sectionIds = new Set(teacher.expandedClasses.map((c) => c.sectionId));
+
+    // Also include sections the teacher is substituting in today, so a substitute (who has no
+    // permanent TeacherAssignment for that section) still sees the roster when marking attendance.
+    const todaySubstitutions = await prisma.timetableSubstitution.findMany({
+      where: { instituteId: req.user.instituteId, substituteTeacherId: teacher.id, date: new Date(new Date().toISOString().slice(0, 10)) },
+      include: { timetable: { select: { sectionId: true, track: true } } },
+    });
+    todaySubstitutions
+      .filter((s) => s.timetable.track === 'ACADEMIC' && s.timetable.sectionId)
+      .forEach((s) => sectionIds.add(s.timetable.sectionId));
+
     const students = await prisma.student.findMany({
-      where: { instituteId: req.user.instituteId, currentSectionId: { in: sectionIds }, status: 'ACTIVE' },
+      where: { instituteId: req.user.instituteId, currentSectionId: { in: [...sectionIds] }, status: 'ACTIVE' },
       include: { currentBatch: true, currentSection: true },
       orderBy: { rollNumber: 'asc' },
     });
@@ -111,9 +126,26 @@ router.get('/students', async (req, res, next) => {
 router.post('/attendance/mark', async (req, res, next) => {
   try {
     const teacher = await getTeacher(req);
-    const { date, subjectId, sectionId, records } = req.body;
-    const allowed = teacher.expandedClasses.some((c) => c.subjectId === subjectId && c.sectionId === sectionId);
-    if (!allowed) throw new AppError('Not assigned to this class/subject', 403);
+    const { date, timetableId, records } = req.body;
+    let { subjectId, sectionId } = req.body;
+
+    if (timetableId) {
+      // Timetable-driven path: lets a substitute teacher (assigned via TimetableSubstitution,
+      // not a permanent TeacherAssignment) mark attendance for the slot they're covering today.
+      const slot = await prisma.timetable.findFirst({
+        where: { id: timetableId, instituteId: req.user.instituteId, track: 'ACADEMIC' },
+      });
+      if (!slot) throw new AppError('Timetable slot not found', 404);
+      subjectId = slot.subjectId;
+      sectionId = slot.sectionId;
+      const effective = await getEffectiveTeacher({ instituteId: req.user.instituteId, timetableId, date });
+      if (effective?.teacherId !== teacher.id) {
+        throw new AppError('You are not the assigned or substitute teacher for this slot today', 403);
+      }
+    } else {
+      const allowed = teacher.expandedClasses.some((c) => c.subjectId === subjectId && c.sectionId === sectionId);
+      if (!allowed) throw new AppError('Not assigned to this class/subject', 403);
+    }
 
     const saved = await markAttendance({
       instituteId: req.user.instituteId, track: 'ACADEMIC',
@@ -155,54 +187,14 @@ router.post('/marks', async (req, res, next) => {
     const exam = await prisma.exam.findFirst({ where: { id: examId, instituteId: req.user.instituteId } });
     if (!exam) throw new AppError('Exam not found', 404);
 
-    const saved = [];
-    for (const entry of entries || []) {
-      const computed = computeResult({
-        theoryMarks: entry.theoryMarks,
-        practicalMarks: entry.practicalMarks,
-        internalMarks: entry.internalMarks,
-        theoryMax: Number(exam.theoryMax),
-        practicalMax: Number(exam.practicalMax),
-        internalMax: Number(exam.internalMax),
-        passPercentage: Number(exam.passPercentage),
-      });
-      const result = await prisma.result.upsert({
-        where: {
-          instituteId_studentId_subjectId_examId: {
-            instituteId: req.user.instituteId,
-            studentId: entry.studentId,
-            subjectId,
-            examId,
-          },
-        },
-        create: {
-          instituteId: req.user.instituteId,
-          track: 'ACADEMIC',
-          studentId: entry.studentId,
-          subjectId,
-          examId,
-          theoryMarks: computed.theoryMarks,
-          practicalMarks: computed.practicalMarks,
-          internalMarks: computed.internalMarks,
-          totalMarks: computed.totalMarks,
-          maxMarks: computed.maxMarks,
-          grade: computed.grade,
-          gradePoints: computed.gradePoints,
-          isPassed: computed.isPassed,
-        },
-        update: {
-          theoryMarks: computed.theoryMarks,
-          practicalMarks: computed.practicalMarks,
-          internalMarks: computed.internalMarks,
-          totalMarks: computed.totalMarks,
-          maxMarks: computed.maxMarks,
-          grade: computed.grade,
-          gradePoints: computed.gradePoints,
-          isPassed: computed.isPassed,
-        },
-      });
-      saved.push(result);
-    }
+    const saved = await bulkEnterResults({
+      instituteId: req.user.instituteId, track: 'ACADEMIC', entries: entries || [], examId, subjectId,
+      maxes: {
+        theoryMax: Number(exam.theoryMax), practicalMax: Number(exam.practicalMax),
+        internalMax: Number(exam.internalMax), passPercentage: Number(exam.passPercentage),
+      },
+      publish: exam.isPublished,
+    });
     return success(res, saved, 'Marks saved');
   } catch (err) { next(err); }
 });
@@ -216,7 +208,8 @@ router.get('/exams', async (req, res, next) => {
       include: { section: { include: { batch: true } } },
       orderBy: { createdAt: 'desc' },
     });
-    return success(res, exams);
+    const gradeScale = (await resolveGradeScale(req.user.instituteId)) || PAKISTANI_GRADE_SCALE;
+    return success(res, { exams, gradeScale });
   } catch (err) { next(err); }
 });
 
